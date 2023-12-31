@@ -87,7 +87,6 @@ impl Manager {
       }
 
     }
-    conn.close();
   }
 
   pub fn on_feed<F>(&self, f: F)
@@ -115,7 +114,6 @@ impl Drop for Manager {
     {
       let mut state = self.state.lock().unwrap();
       state.running = false;
-      state.on_feed = None;
     }
     self.thread.take().unwrap().join().unwrap();
   }

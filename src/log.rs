@@ -4,27 +4,28 @@ use sqlite;
 
 use crate::interface;
 
-struct FeedPoint {
-  time: i64,
-  values: Vec<interface::FeedValue>,
+enum LogMessage {
+    FeedPoint {
+        time: i64,
+        values: Vec<interface::FeedValue>,
+    },
+    Terminate,
 }
 
 pub struct LogFeedWriter {
-    tx: Option<mpsc::Sender::<FeedPoint>>,
+    tx: mpsc::Sender::<LogMessage>,
     handle: Option<thread::JoinHandle<()>>,
 }
 
 impl Drop for LogFeedWriter {
   fn drop(&mut self) {
-    self.tx.take(); // Explicitly drop the sender so that the recv thread can die
-
+    self.tx.send(LogMessage::Terminate);
     let handle = self.handle.take();
     handle.unwrap().join().unwrap();
   }
 }
 
 impl LogFeedWriter {
-
     fn ensure_columns(keys: &Vec<String>, conn: &sqlite::Connection) {
       let mut current_keys : Vec<String> = vec![];
       for row in conn.prepare("PRAGMA TABLE_INFO(points);").unwrap()
@@ -47,7 +48,7 @@ impl LogFeedWriter {
     }
 
     pub fn new(filename: &str, keys: Vec<String>) -> LogFeedWriter {
-        let (tx, rx) = mpsc::channel::<FeedPoint>();
+        let (tx, rx) = mpsc::channel::<LogMessage>();
 
         let conn = sqlite::open(filename).unwrap();
         conn.execute("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; ").unwrap();
@@ -70,26 +71,28 @@ impl LogFeedWriter {
 
             let mut remaining = 0; 
             while let Ok(val) = rx.recv() {
-                if remaining == 0 {
-                    conn.execute("BEGIN;").unwrap();
-                    remaining = 5000;
-                }
-                LogFeedWriter::write(&mut stmt, val.time, val.values);
-
-                remaining -= 1;
-                if remaining == 0 {
-                    conn.execute("COMMIT;").unwrap();
+                match val {
+                    LogMessage::FeedPoint{time, values} => {
+                        if remaining == 0 {
+                            conn.execute("BEGIN;").unwrap();
+                            remaining = 5000;
+                        }
+                        LogFeedWriter::write(&mut stmt, time, values);
+                        remaining -= 1;
+                        if remaining == 0 {
+                            conn.execute("COMMIT;").unwrap();
+                        }
+                    },
+                    LogMessage::Terminate => break,
                 }
             }
             conn.execute("COMMIT;").unwrap();
         }).unwrap();
-        LogFeedWriter{ tx: Some(tx), handle: Some(thr) }
+        LogFeedWriter{ tx, handle: Some(thr) }
     }
 
     pub fn add(&self, time: i64, values: Vec<interface::FeedValue>) {
-      if let Some(tx) = &self.tx {
-        tx.send(FeedPoint{time, values}).unwrap();
-      }
+      self.tx.send(LogMessage::FeedPoint{time, values}).unwrap();
     }
 
     fn write(stmt: &mut sqlite::Statement, time: i64, vals: Vec<interface::FeedValue>) {

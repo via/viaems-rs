@@ -8,7 +8,7 @@ use crate::interface;
 pub struct UdpConnection {
   socket: UdpSocket,
   remote_addr: String,
-  thr: thread::JoinHandle<()>,
+  thr: Option<thread::JoinHandle<()>>,
   running: Arc<atomic::AtomicBool>,
   rx: mpsc::Receiver<(i64, interface::Message)>,
 
@@ -57,7 +57,7 @@ impl UdpConnection {
         UdpConnection { 
           socket, 
           remote_addr: remote_addr.to_string(), 
-          thr, 
+          thr: Some(thr), 
           rx ,
           running,
         }
@@ -73,10 +73,14 @@ impl UdpConnection {
         remote_addr: self.remote_addr.clone(),
       }
     }
+}
 
-    pub fn close(self) {
+impl Drop for UdpConnection {
+    fn drop(&mut self) {
       self.running.store(false, atomic::Ordering::Relaxed);
-      self.thr.join().unwrap();
+      if let Some(t) = self.thr.take() {
+          t.join().unwrap();
+      }
     }
 }
 
