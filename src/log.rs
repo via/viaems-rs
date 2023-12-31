@@ -19,7 +19,7 @@ pub struct LogFeedWriter {
 
 impl Drop for LogFeedWriter {
   fn drop(&mut self) {
-    self.tx.send(LogMessage::Terminate);
+    self.tx.send(LogMessage::Terminate).unwrap();
     let handle = self.handle.take();
     handle.unwrap().join().unwrap();
   }
