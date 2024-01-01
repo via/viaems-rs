@@ -92,6 +92,7 @@ impl UdpConnectionWriter {
 }
 
 use rusb::{Context, UsbContext, HotplugBuilder, Device};
+use rusb_async::TransferPool;
 
 pub struct UsbConnection {
     rx: mpsc::Receiver<(i64, interface::Message)>,
@@ -124,27 +125,32 @@ impl UsbConnection {
 //            }});
         let context = Context::new().unwrap();
         let mut devh = context.open_device_with_vid_pid(0x0483, 0x5740).expect("Could not open device");
-        for i in [0, 1, 2] {
+        for i in 0..=2 {
             if devh.kernel_driver_active(i).unwrap() {
                 devh.detach_kernel_driver(i).expect("Could not detach kernel from device");
             }
         }
+        let mut pool = TransferPool::new(Arc::new(devh)).expect("could not create pool");
         let (tx, rx) = mpsc::channel();
         std::thread::spawn({
             move || {
-                let mut buf = [0; 16384];
+                for _ in 1..=4 {
+                    let mut buf : Vec<u8> = vec![];
+                    buf.reserve(16384);
+                    pool.submit_bulk(0x82, buf).unwrap();
+                }
                 loop {
-                    let res = devh.read_bulk(0x82, &mut buf, Duration::from_secs(1));
-                    match res {
-                        Ok(n_bytes) => {
+                    match pool.poll(Duration::from_secs(1)) {
+                        Ok(bytes) => {
                             let unix_time : i64 =
                                 SystemTime::now()
                                 .duration_since(SystemTime::UNIX_EPOCH).unwrap()
                                 .as_nanos().try_into().unwrap();
-                            let n = serde_cbor::de::from_slice(&buf[0..n_bytes]).unwrap();
+                            let n = serde_cbor::de::from_slice(&bytes[..]).unwrap();
                             if tx.send((unix_time, n)).is_err() { break; }
+                            pool.submit_bulk(0x82, bytes).unwrap();
                         },
-                        _ => break,
+                        Err(e) => {println!("{e:?}"); break},
                     }
 
                 }

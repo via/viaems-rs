@@ -10,6 +10,7 @@ sqlite = {version = "*", features = ["bundled"]}
 clap = { version = "4.4.12", features = ["derive"] }
 ctrlc = "3.4.2"
 rusb = "0.9.3"
+rusb-async = "0.0.1-alpha"
 
 [profile.release]
 lto = true
