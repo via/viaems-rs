@@ -1,7 +1,7 @@
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "method")]
 #[serde(rename_all = "lowercase")]
 pub enum RequestMessage {
@@ -10,14 +10,14 @@ pub enum RequestMessage {
   Get { id: u32, path: StructurePath },
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum StructurePathElement {
   ArrayIndex(u32),
   MapField(String),
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct StructurePath(Vec<StructurePathElement>);
 
 impl StructurePath {
@@ -32,13 +32,13 @@ impl StructurePath {
   }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct StructureLeaf {
   _type: String,
   description: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum ResponseValue {
   Str(String),
@@ -52,7 +52,7 @@ pub enum ResponseValue {
   None
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "lowercase")]
 #[serde(tag = "type")]
 pub enum Message {
@@ -69,7 +69,7 @@ pub enum FeedValue {
   Float(f32),
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum OutputType {
   Ignition,
@@ -77,7 +77,7 @@ pub enum OutputType {
   Disabled,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct OutputValue {
   pin: u32,
 #[serde(rename = "type")]
