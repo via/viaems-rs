@@ -29,14 +29,14 @@ pub struct Manager{
 }
 
 impl Manager {
-  pub fn new(connection: connection::UdpConnection) -> Manager {
+  pub fn new(connection: connection::UsbConnection) -> Manager {
     let state = Arc::new(Mutex::new(ConnectionState{
       on_feed: None,
       commands: vec![],
       running: true,
       }));
 
-    let writer = connection.get_writer();
+    let writer = connection::UdpConnection::new("127.0.0.1:5555", "127.0.0.1:5556").get_writer();
     let thread = thread::spawn({
         let state = state.clone();
         || {
@@ -47,7 +47,7 @@ impl Manager {
     Manager { thread: Some(thread), state, writer }
   }
 
-  fn main_loop(conn: connection::UdpConnection, state: Arc<Mutex<ConnectionState>>) {
+  fn main_loop(conn: connection::UsbConnection, state: Arc<Mutex<ConnectionState>>) {
     let mut current_keys : Option<Vec<String>> = None;
     loop {
       match conn.recv(Duration::from_millis(100)) {
@@ -69,7 +69,7 @@ impl Manager {
                 if let Some(command) = state.commands.pop() {
                   (command.callback)(response);
                   if let Some(command) = &state.commands.first() {
-                    conn.get_writer().send(&command.message);
+                    //conn.get_writer().send(&command.message);
                   }
                 }
               },

@@ -40,7 +40,8 @@ enum StatusMsg {
 
 fn record(filename: &str, udpsrc: &str, udpdest: &str) {
     let conn = connection::UdpConnection::new(udpsrc, udpdest);
-    let g = viaems::Manager::new(conn);
+    let uconn = connection::UsbConnection::new();
+    let g = viaems::Manager::new(uconn);
     let (status_chan_tx, status_chan) = mpsc::channel::<StatusMsg>();
 
     g.on_feed({
