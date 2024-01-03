@@ -18,6 +18,16 @@ pub enum ConnError {
     Disconnected,
 }
 
+impl From<mpsc::RecvTimeoutError> for ConnError {
+    fn from(inner: mpsc::RecvTimeoutError) -> ConnError {
+        match inner {
+            mpsc::RecvTimeoutError::Timeout => ConnError::Timeout,
+            _ => ConnError::Disconnected,
+        }
+    }
+}
+
+
 pub struct Writer {
     tx: mpsc::Sender<interface::Message>,
 }

@@ -1,11 +1,13 @@
 use std::sync::{mpsc, atomic, Arc};
 use std::time::{SystemTime, Duration};
 use crate::interface;
+use crate::connection::{Connection, ConnError, RxMessage, Writer};
 use rusb::{Context, UsbContext, HotplugBuilder, Device};
 use rusb_async::TransferPool;
 
 pub struct UsbConnection {
-    rx: mpsc::Receiver<(i64, interface::Message)>,
+    recv_rx: mpsc::Receiver<RxMessage>,
+    send_tx: mpsc::Sender<interface::Message>,
 }
 
 struct UsbHandle {}
@@ -40,8 +42,11 @@ impl UsbConnection {
                 devh.detach_kernel_driver(i).expect("Could not detach kernel from device");
             }
         }
-        let mut pool = TransferPool::new(Arc::new(devh)).expect("could not create pool");
-        let (tx, rx) = mpsc::channel();
+        let devh = Arc::new(devh);
+        let mut pool = TransferPool::new(devh.clone()).expect("could not create pool");
+
+        let (recv_tx, recv_rx) = mpsc::channel();
+
         std::thread::spawn({
             move || {
                 for _ in 1..=4 {
@@ -52,12 +57,10 @@ impl UsbConnection {
                 loop {
                     match pool.poll(Duration::from_secs(1)) {
                         Ok(bytes) => {
-                            let unix_time : i64 =
-                                SystemTime::now()
-                                .duration_since(SystemTime::UNIX_EPOCH).unwrap()
-                                .as_nanos().try_into().unwrap();
-                            let n = serde_cbor::de::from_slice(&bytes[..]).unwrap();
-                            if tx.send((unix_time, n)).is_err() { break; }
+                            let payload = serde_cbor::de::from_slice(&bytes[..]).unwrap();
+                            let time = SystemTime::now();
+
+                            if recv_tx.send(RxMessage{time, payload}).is_err() { break; }
                             pool.submit_bulk(0x82, bytes).unwrap();
                         },
                         Err(e) => {println!("{e:?}"); break},
@@ -67,10 +70,34 @@ impl UsbConnection {
             }
         });
 
+        let mut anotherpool = TransferPool::new(devh).expect("could not create pool");
+        let (send_tx, send_rx) = mpsc::channel::<interface::Message>();
 
-        UsbConnection { rx }
+        std::thread::spawn({
+            move || {
+                loop {
+                    match send_rx.recv() {
+                        Ok(msg) => {
+                            let bytes = serde_cbor::to_vec(&msg).unwrap();
+                            anotherpool.submit_bulk(0x01, bytes).unwrap();
+                        }
+                        _ => break,
+                    }
+                }
+            }
+        });
+
+
+        UsbConnection { recv_rx, send_tx }
     }
-    pub fn recv(&self, timeout: Duration) -> Result<(i64, interface::Message), mpsc::RecvTimeoutError> {
-      return self.rx.recv_timeout(timeout);
+}
+
+impl Connection for UsbConnection {
+    fn recv(&self, timeout: Duration) -> Result<RxMessage, ConnError> {
+      return Ok(self.recv_rx.recv_timeout(timeout)?);
+    }
+
+    fn get_writer(&self) -> Writer {
+        Writer { tx: self.send_tx.clone() }
     }
 }

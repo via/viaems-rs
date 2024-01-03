@@ -87,15 +87,6 @@ impl UdpConnection {
     }
 }
 
-impl From<mpsc::RecvTimeoutError> for connection::ConnError {
-    fn from(inner: mpsc::RecvTimeoutError) -> connection::ConnError {
-        match inner {
-            mpsc::RecvTimeoutError::Timeout => connection::ConnError::Timeout,
-            _ => connection::ConnError::Disconnected,
-        }
-    }
-}
-
 impl connection::Connection for UdpConnection {
 
     fn recv(&self, timeout: Duration) -> Result<connection::RxMessage, connection::ConnError> {
