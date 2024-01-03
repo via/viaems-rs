@@ -1,12 +1,13 @@
 use std::sync::mpsc;
 use std::thread;
+use std::time::SystemTime;
 use sqlite;
 
 use crate::interface;
 
 enum LogMessage {
     FeedPoint {
-        time: i64,
+        time: SystemTime,
         values: Vec<interface::FeedValue>,
     },
     Terminate,
@@ -91,13 +92,15 @@ impl LogFeedWriter {
         LogFeedWriter{ tx, handle: Some(thr) }
     }
 
-    pub fn add(&self, time: i64, values: Vec<interface::FeedValue>) {
+    pub fn add(&self, time: SystemTime, values: Vec<interface::FeedValue>) {
       self.tx.send(LogMessage::FeedPoint{time, values}).unwrap();
     }
 
-    fn write(stmt: &mut sqlite::Statement, time: i64, vals: Vec<interface::FeedValue>) {
+    fn write(stmt: &mut sqlite::Statement, time: SystemTime, vals: Vec<interface::FeedValue>) {
+        let epoch_time : i64 = time.duration_since(SystemTime::UNIX_EPOCH).unwrap()
+            .as_nanos().try_into().unwrap();
         stmt.reset().unwrap();
-        stmt.bind((1, time)).unwrap();
+        stmt.bind((1, epoch_time)).unwrap();
         for (i, v) in vals.iter().enumerate() {
             match v { interface::FeedValue::Int(x) => stmt.bind((i + 2, *x as i64)),
                       interface::FeedValue::Float(x) => stmt.bind((i + 2, *x as f64)),

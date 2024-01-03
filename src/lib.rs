@@ -1,14 +1,14 @@
 pub mod interface;
 pub mod connection;
 mod log;
+
 pub use log::LogFeedWriter;
 
 use std::thread;
 use std::sync::{Mutex, Arc};
-use std::sync::mpsc::RecvTimeoutError;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
-type FeedCallback = dyn FnMut(i64, &Vec<String>, &Vec<interface::FeedValue>) -> () + Send; 
+type FeedCallback = dyn FnMut(SystemTime, &Vec<String>, &Vec<interface::FeedValue>) -> () + Send; 
 type RequestCallback = dyn FnOnce(interface::ResponseValue) -> () + Send; 
 
 struct Command {
@@ -25,18 +25,18 @@ struct ConnectionState {
 pub struct Manager{
   thread: Option<thread::JoinHandle<()>>,
   state: Arc<Mutex<ConnectionState>>,
-  writer: connection::UdpConnectionWriter,
+  writer: connection::Writer,
 }
 
 impl Manager {
-  pub fn new(connection: connection::UsbConnection) -> Manager {
+  pub fn new(connection: Box<dyn connection::Connection + Send>) -> Manager {
     let state = Arc::new(Mutex::new(ConnectionState{
       on_feed: None,
       commands: vec![],
       running: true,
       }));
 
-    let writer = connection::UdpConnection::new("127.0.0.1:5555", "127.0.0.1:5556").get_writer();
+    let writer = connection.get_writer();
     let thread = thread::spawn({
         let state = state.clone();
         || {
@@ -47,12 +47,12 @@ impl Manager {
     Manager { thread: Some(thread), state, writer }
   }
 
-  fn main_loop(conn: connection::UsbConnection, state: Arc<Mutex<ConnectionState>>) {
+  fn main_loop(conn: Box<dyn connection::Connection>, state: Arc<Mutex<ConnectionState>>) {
     let mut current_keys : Option<Vec<String>> = None;
     loop {
       match conn.recv(Duration::from_millis(100)) {
-        Ok((time, msg)) => {
-          match msg {
+        Ok(connection::RxMessage{time, payload}) => {
+          match payload {
             interface::Message::Feed{values} => {
               let mut state = state.lock().unwrap();
               if let Some(keys) = &current_keys {
@@ -69,7 +69,8 @@ impl Manager {
                 if let Some(command) = state.commands.pop() {
                   (command.callback)(response);
                   if let Some(command) = &state.commands.first() {
-                    //conn.get_writer().send(&command.message);
+                    let msg = command.message.as_ref().clone();
+                    conn.get_writer().send(msg);
                   }
                 }
               },
@@ -77,8 +78,8 @@ impl Manager {
           }
         }
 
-        Err(RecvTimeoutError::Disconnected) => break,
-          _ => (),
+        Err(connection::ConnError::Timeout) => (),
+          _ => break,
       }
       // Exit condition
       let state = state.lock().unwrap();
@@ -90,7 +91,7 @@ impl Manager {
   }
 
   pub fn on_feed<F>(&self, f: F)
-  where F: FnMut(i64, &Vec<String>, &Vec<interface::FeedValue>) -> () + Send + 'static {
+  where F: FnMut(SystemTime, &Vec<String>, &Vec<interface::FeedValue>) -> () + Send + 'static {
     let mut locked = self.state.lock().unwrap();
     locked.on_feed = Some(Box::new(f));
   }
@@ -99,7 +100,7 @@ impl Manager {
   where F: FnOnce(interface::ResponseValue) -> () + 'static + Send {
     let mut locked = self.state.lock().unwrap();
     if locked.commands.len() == 0 {
-      self.writer.send(&msg);
+      self.writer.send(msg.clone());
     }
     let command = Command { 
 callback: Box::new(callback), 

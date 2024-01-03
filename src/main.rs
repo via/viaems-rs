@@ -3,7 +3,7 @@ use viaems::{self, interface, connection};
 use clap::{Parser, Subcommand};
 use ctrlc;
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -20,7 +20,8 @@ enum CliCommands {
   Record {
 #[arg(default_value = "log.sq3")]
     filename: String, 
-  }
+  },
+  Bootloader,
 }
 
 
@@ -28,10 +29,14 @@ fn main() {
   let args = Args::parse();
   match args.command {
     CliCommands::Record{filename} => record(&filename, &args.udpsrc, &args.udpdest),
+    CliCommands::Bootloader => bootloader(),
   }
 
 }
 
+fn bootloader() {
+}
+    
 
 enum StatusMsg {
     Terminate,
@@ -39,9 +44,9 @@ enum StatusMsg {
 }
 
 fn record(filename: &str, udpsrc: &str, udpdest: &str) {
-    let conn = connection::UdpConnection::new(udpsrc, udpdest);
-    let uconn = connection::UsbConnection::new();
-    let g = viaems::Manager::new(uconn);
+    let conn = Box::new(connection::UdpConnection::new(udpsrc, udpdest));
+//    let uconn = connection::UsbConnection::new();
+    let g = viaems::Manager::new(conn);
     let (status_chan_tx, status_chan) = mpsc::channel::<StatusMsg>();
 
     g.on_feed({
@@ -51,7 +56,7 @@ fn record(filename: &str, udpsrc: &str, udpdest: &str) {
       let mut total_count = 0;
       let mut this_count = 0;
       let mut time_of_last_msg = Instant::now();
-      move |time: i64, keys: &Vec<String>, vals: &Vec<interface::FeedValue>| {
+      move |time: SystemTime, keys: &Vec<String>, vals: &Vec<interface::FeedValue>| {
         if writer.is_none() {
           writer = Some(viaems::LogFeedWriter::new(&filename, keys.clone()));
         }
