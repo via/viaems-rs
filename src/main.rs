@@ -80,14 +80,24 @@ fn record(filename: &str, udpsrc: &str, udpdest: &str) {
     let getcmd = interface::RequestMessage::Structure{id: 5};
     g.command(interface::Message::Request(getcmd),
       |resp: interface::ResponseValue| {
-        println!("response: {:?}", resp);
+        println!("struct response: {:?}", resp);
        }
      );
+
+    for i in 1..=5 {
+      let ping = interface::RequestMessage::Ping{id: i};
+      g.command(interface::Message::Request(ping),
+        |resp: interface::ResponseValue| {
+          println!("ping response: {:?}", resp);
+         }
+       );
+      std::thread::sleep(Duration::from_millis(500));
+    }
 
     ctrlc::set_handler(move || status_chan_tx.send(StatusMsg::Terminate).unwrap() ).unwrap();
 
     loop {
-        match status_chan.recv_timeout(Duration::from_millis(1000)) {
+        match status_chan.recv_timeout(Duration::from_millis(1200)) {
             Ok(StatusMsg::Terminate) => break,
             Ok(StatusMsg::FeedCount{count, rate}) => {
                 println!("Connected! {} feed points received ({:.0}/s)", count, rate);

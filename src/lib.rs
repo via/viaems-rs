@@ -7,18 +7,19 @@ pub use log::LogFeedWriter;
 use std::thread;
 use std::sync::{Mutex, Arc};
 use std::time::{Duration, SystemTime};
+use std::collections::VecDeque;
 
 type FeedCallback = dyn FnMut(SystemTime, &Vec<String>, &Vec<interface::FeedValue>) -> () + Send; 
 type RequestCallback = dyn FnOnce(interface::ResponseValue) -> () + Send; 
 
 struct Command {
   callback: Box<RequestCallback>,
-  message: Box<interface::Message>,
+  message: interface::Message,
 }
 
 struct ConnectionState {
   on_feed: Option<Box<FeedCallback>>,
-  commands: Vec<Command>,
+  commands: VecDeque<Command>,
   running: bool,
 }
 
@@ -32,7 +33,7 @@ impl Manager {
   pub fn new(connection: Box<dyn connection::Connection + Send>) -> Manager {
     let state = Arc::new(Mutex::new(ConnectionState{
       on_feed: None,
-      commands: vec![],
+      commands: VecDeque::new(),
       running: true,
       }));
 
@@ -66,10 +67,10 @@ impl Manager {
               },
               interface::Message::Response { id: _, response } => {
                 let mut state = state.lock().unwrap();
-                if let Some(command) = state.commands.pop() {
+                if let Some(command) = state.commands.pop_front() {
                   (command.callback)(response);
-                  if let Some(command) = &state.commands.first() {
-                    let msg = command.message.as_ref().clone();
+                  if let Some(command) = &state.commands.front() {
+                    let msg = command.message.clone();
                     conn.get_writer().send(msg);
                   }
                 }
@@ -103,10 +104,10 @@ impl Manager {
       self.writer.send(msg.clone());
     }
     let command = Command { 
-callback: Box::new(callback), 
-            message: Box::new(msg),
+            callback: Box::new(callback), 
+            message: msg,
     };
-    locked.commands.push(command);
+    locked.commands.push_back(command);
   }
 }
 

@@ -8,6 +8,9 @@ use rusb_async::TransferPool;
 pub struct UsbConnection {
     recv_rx: mpsc::Receiver<RxMessage>,
     send_tx: mpsc::Sender<interface::Message>,
+    running: Arc<atomic::AtomicBool>,
+    recv_thread: Option<std::thread::JoinHandle<()>>,
+    send_thread: Option<std::thread::JoinHandle<()>>,
 }
 
 struct UsbHandle {}
@@ -42,12 +45,14 @@ impl UsbConnection {
                 devh.detach_kernel_driver(i).expect("Could not detach kernel from device");
             }
         }
+
         let devh = Arc::new(devh);
-        let mut pool = TransferPool::new(devh.clone()).expect("could not create pool");
+        let running = Arc::new(atomic::AtomicBool::new(true));
 
         let (recv_tx, recv_rx) = mpsc::channel();
-
-        std::thread::spawn({
+        let recv_thread = std::thread::spawn({
+            let mut pool = TransferPool::new(devh.clone()).expect("could not create pool");
+            let running = running.clone();
             move || {
                 for _ in 1..=4 {
                     let mut buf : Vec<u8> = vec![];
@@ -55,32 +60,43 @@ impl UsbConnection {
                     pool.submit_bulk(0x82, buf).unwrap();
                 }
                 loop {
+                    if !running.load(atomic::Ordering::Relaxed) {
+                      break;
+                    }
                     match pool.poll(Duration::from_secs(1)) {
                         Ok(bytes) => {
-                            let payload = serde_cbor::de::from_slice(&bytes[..]).unwrap();
-                            let time = SystemTime::now();
-
-                            if recv_tx.send(RxMessage{time, payload}).is_err() { break; }
-                            pool.submit_bulk(0x82, bytes).unwrap();
+                            match serde_cbor::de::from_slice(&bytes[..]) {
+                              Ok(payload) => {
+                                let time = SystemTime::now();
+                                if recv_tx.send(RxMessage{time, payload}).is_err() { break; }
+                                pool.submit_bulk(0x82, bytes).unwrap();
+                              },
+                              Err(e) => println!("Failed to decode! {e}"),
+                            }
                         },
-                        Err(e) => {println!("{e:?}"); break},
+                        Err(e) => {
+                          println!("{e:?}"); 
+                        },
                     }
 
                 }
             }
         });
 
-        let mut anotherpool = TransferPool::new(devh).expect("could not create pool");
         let (send_tx, send_rx) = mpsc::channel::<interface::Message>();
-
-        std::thread::spawn({
+        let send_thread = std::thread::spawn({
+            let running = running.clone();
             move || {
                 loop {
-                    match send_rx.recv() {
+                    if !running.load(atomic::Ordering::Relaxed) {
+                      break;
+                    }
+                    match send_rx.recv_timeout(Duration::from_millis(100)) {
                         Ok(msg) => {
                             let bytes = serde_cbor::to_vec(&msg).unwrap();
-                            anotherpool.submit_bulk(0x01, bytes).unwrap();
+                            devh.write_bulk(0x01, &bytes[..], Duration::from_secs(1)).unwrap();
                         }
+                        Err(mpsc::RecvTimeoutError::Timeout) => continue,
                         _ => break,
                     }
                 }
@@ -88,9 +104,29 @@ impl UsbConnection {
         });
 
 
-        UsbConnection { recv_rx, send_tx }
+        UsbConnection { 
+          recv_rx, 
+          send_tx, 
+          running, 
+          recv_thread: Some(recv_thread),
+          send_thread: Some(send_thread),
+        }
     }
 }
+
+impl Drop for UsbConnection {
+  fn drop(&mut self) {
+    self.running.store(false, atomic::Ordering::Relaxed);
+      if let Some(t) = self.recv_thread.take() {
+          t.join().unwrap();
+      }
+      if let Some(t) = self.send_thread.take() {
+          t.join().unwrap();
+      }
+  }
+}
+
+
 
 impl Connection for UsbConnection {
     fn recv(&self, timeout: Duration) -> Result<RxMessage, ConnError> {
