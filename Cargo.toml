@@ -1,16 +1,19 @@
-[package]
-name = "viaems"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+resolver = "2"
+members = [
+  "viaems",
+  "viaems-ui",
+  "viaems-firmware"
+]
 
-[dependencies]
-serde_cbor = "0.11.2"
-serde = {version = "*", features = ["derive"]}
-sqlite = {version = "*", features = ["bundled"]}
-clap = { version = "4.4.12", features = ["derive"] }
-ctrlc = "3.4.2"
-rusb = "0.9.3"
-rusb-async = "0.0.1-alpha"
+[profile.dev]
+opt-level = 1
+codegen-units = 16
+debug = true
+lto = false
 
 [profile.release]
+codegen-units = 1 # better optimizations
+opt-level = 3
 lto = true
+debug = true
