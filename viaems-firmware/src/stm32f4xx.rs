@@ -19,6 +19,13 @@ impl Scheduler {
 
 static TIMER_QUEUE : TimerQueue<Stm32f427> = TimerQueue::new();
 
+use crate::app;
+pub fn tim2_interrupt(_cx: app::tim2_interrupt::Context) {
+  unsafe { TIMER_QUEUE.on_monotonic_interrupt() };
+}
+
+
+
 impl Monotonic for Stm32f427 {
 
     type Instant = fugit::TimerInstantU32<4_000_000>;
@@ -198,9 +205,9 @@ impl Stm32f427 {
         TIMER_QUEUE.delay(duration).await;
     }
 
-//    pub fn now() -> <Self as Monotonic>::Instant {
-//        <Self as Monotonic>::now()
-//    }
+    pub fn now() -> <Self as Monotonic>::Instant {
+        TIMER_QUEUE.now()
+    }
 
     pub fn init() {
         Stm32f427::setup_itm();

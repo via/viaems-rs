@@ -20,6 +20,7 @@ mod app {
     use super::*;
 
     use crate::another::exttest;
+    use crate::stm32f4xx::tim2_interrupt;
 
     #[shared]
     pub struct Shared {
@@ -80,7 +81,7 @@ mod app {
 
         sim::spawn().unwrap();
         logger::spawn().unwrap();
-        exttest::spawn().unwrap();
+        //exttest::spawn().unwrap();
 
         let (s, r) = make_channel!(LogMsg, 16);
 
@@ -165,11 +166,17 @@ mod app {
             let cycles = cortex_m::peripheral::DWT::get_cycle_count();
             decode::spawn(Trigger{time: cycles, trigger: 0}).ok();
             platform::delay(1000.millis()).await;
+            rprintln!("Current time: {:?}", platform::now());
         }
     }
+
 
     extern "Rust" {
         #[task(priority = 1)]
         async fn exttest(cx: exttest::Context);
+
+      #[task(binds=TIM2)]
+        fn tim2_interrupt(cx: tim2_interrupt::Context);
+
     }
 }
