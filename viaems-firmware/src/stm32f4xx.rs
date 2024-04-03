@@ -1,26 +1,26 @@
 use fugit;
-use rtic_time::Monotonic;
-use stm32f4::stm32f427::*;
+use rtic_time::{Monotonic, TimerQueue};
+//use stm32f4::stm32f427::*;
+use stm32_metapac as pac;
 
 use rtic_monotonics::systick::Systick;
 
 pub struct Stm32f427 {
-    mono: Option<Scheduler>,
-    gpioe: GPIOE,
-    itm: ITM,
 }
 
 pub struct Scheduler {
-    tim2: TIM2,
 }
 
 impl Scheduler {
-    pub fn new(tim2: TIM2) -> Self {
-        Scheduler { tim2 }
+    pub fn new() -> Self {
+        Scheduler { }
     }
 }
 
-impl Monotonic for Scheduler {
+static TIMER_QUEUE : TimerQueue<Stm32f427> = TimerQueue::new();
+
+impl Monotonic for Stm32f427 {
+
     type Instant = fugit::TimerInstantU32<4_000_000>;
     type Duration = fugit::TimerDurationU32<4_000_000>;
 
@@ -28,19 +28,19 @@ impl Monotonic for Scheduler {
     const TICK_PERIOD : Self::Duration = Self::Duration::from_ticks(0);
 
     fn now() -> Self::Instant {
-      //  let counter = self.tim2.cnt.read().bits();
-        let counter = 0;
+        let counter = pac::TIM2.cnt().read().0;
         Self::Instant::from_ticks(counter)
     }
 
     fn set_compare(instant: Self::Instant) {
-//        self.tim2.ccr4().write(|w| w.bits(instant.ticks()));
+        pac::TIM2.ccr(3).write(|w|  w.set_ccr(instant.ticks()));
     }
     fn clear_compare_flag() {
-//        self.tim2.sr.modify(|_, w| w.cc4if().clear_bit());
+        pac::TIM2.sr().modify(|w| w.set_ccif(3, false));
     }
 
     fn pend_interrupt() {
+        pac::TIM2.egr().write(|w| w.set_ccg(3, true));
     }
 
     fn on_interrupt() {
@@ -51,162 +51,167 @@ unsafe impl Sync for Stm32f427 {}
 
 impl Stm32f427 {
     // Configure TIM8 to run at HCLK speed and overflow at 4
-    fn configure_tim8(tim8: &TIM8) {
-        tim8.arr.write(|w| w.arr().bits(41)); // 42 == 4 MHz
-        tim8.dier.write(|w| w.uie().enabled());
+    fn configure_tim8() {
+        let tim8 = pac::TIM8;
 
-        tim8.cr2.write(|w| w.mms().update());
-        tim8.cr1.write(|w| w.cen().enabled());
+        tim8.arr().write(|w| w.set_arr(41)); // 42 == 4 MHz
+        tim8.dier().write(|w| w.set_uie(true));
+
+        tim8.cr2().write(|w| w.set_mms(pac::timer::vals::Mms::UPDATE));
+        tim8.cr1().write(|w| w.set_cen(true));
     }
 
-    fn configure_tim2(tim2: &TIM2) {
-        tim2.smcr.write(|w| {
-            w.sms().ext_clock_mode();
-            w.ts().itr1();
-            w
+    pub fn configure_tim2() {
+        let tim2 = pac::TIM2;
+
+        tim2.smcr().write(|w| {
+            w.set_sms(pac::timer::vals::Sms::EXT_CLOCK_MODE);
+            w.set_ts(pac::timer::vals::Ts::ITR1);
         });
 
-        tim2.arr.write(|w| w.arr().bits(0xffffffff));
-        tim2.dier.write(|w| {
-            w.cc1ie().set_bit();
-            w.cc2ie().set_bit();
-            w.cc4ie().set_bit();
-            w
+        tim2.arr().write(|w| w.set_arr(0xffffffff));
+        tim2.dier().write(|w| {
+            w.set_ccie(0, true);
+            w.set_ccie(1, true);
+            w.set_ccie(3, true);
         });
-        tim2.cr1.modify(|_r, w| w.cen().set_bit());
+
+        tim2.cr1().modify(|w| w.set_cen(true));
     }
 
-    fn enable_peripheral_clocks(rcc: &RCC) {
-        rcc.apb1enr.modify(|_, w| {
-            w.pwren().enabled();
-            w.tim2en().enabled();
-            w.tim3en().enabled();
-            w
+    fn enable_peripheral_clocks() {
+        let rcc = pac::RCC;
+        rcc.apb1enr().modify(|w| {
+            w.set_pwren(true);
+            w.set_tim2en(true);
+            w.set_tim3en(true);
         });
 
-        rcc.apb2enr.modify(|_, w| {
-            w.tim1en().enabled();
-            w.tim8en().enabled();
-            w.tim9en().enabled();
-            w.spi1en().enabled();
-            w
+        rcc.apb2enr().modify(|w| {
+            w.set_tim1en(true);
+            w.set_tim8en(true);
+            w.set_tim9en(true);
+            w.set_spi1en(true);
         });
 
-        rcc.ahb1enr.modify(|_, w| {
-            w.gpioaen().enabled();
-            w.gpioben().enabled();
-            w.gpiocen().enabled();
-            w.gpioden().enabled();
-            w.gpioeen().enabled();
-            w.dma1en().enabled();
-            w.dma2en().enabled();
-            w
+        rcc.ahb1enr().modify(|w| {
+            w.set_gpioaen(true);
+            w.set_gpioben(true);
+            w.set_gpiocen(true);
+            w.set_gpioden(true);
+            w.set_gpioeen(true);
+            w.set_dma1en(true);
+            w.set_dma2en(true);
         });
 
-        rcc.ahb2enr.modify(|_, w| w.otgfsen().enabled());
+        rcc.ahb2enr().modify(|w| w.set_usb_otg_fsen(true));
     }
 
-    fn setup_clock(periphs: &Peripherals, xtal_freq_mhz: u8) {
-        let rcc = &periphs.RCC;
+    fn setup_clock(xtal_freq_mhz: u8) {
+        let rcc = pac::RCC;
 
         // Turn on HSE
-        rcc.cr.modify(|_, w| w.hseon().on());
-        while rcc.cr.read().hserdy().is_not_ready() {}
+        rcc.cr().modify(|w| w.set_hseon(true));
+        while !rcc.cr().read().hserdy() {}
 
         // Configure PLL
-        rcc.pllcfgr.write(|w| unsafe {
-            w.pllsrc().hse();
-            w.pllm().bits(xtal_freq_mhz);
-            w.plln().bits(336);
-            w.pllq().bits(7);
-            w.pllp().bits(0);
-            w
+        rcc.pllcfgr().write(|w| {
+            w.set_pllsrc(pac::rcc::vals::Pllsrc::HSE);
+            w.set_pllm(pac::rcc::vals::Pllm::from_bits(xtal_freq_mhz));
+            w.set_plln(pac::rcc::vals::Plln::from_bits(336));
+            w.set_pllq(pac::rcc::vals::Pllq::from_bits(7));
+            w.set_pllp(pac::rcc::vals::Pllp::from_bits(0));
         });
 
         // Turn on PLL
-        rcc.cr.modify(|_, w| w.pllon().on());
-        while rcc.cr.read().pllrdy().is_not_ready() {}
+        rcc.cr().modify(|w| w.set_pllon(true));
+        while !rcc.cr().read().pllrdy() {}
 
         // Turn on overdrive
-        let pwr = &periphs.PWR;
-        pwr.cr.modify(|_, w| w.oden().set_bit());
-        while pwr.csr.read().odrdy().bit_is_clear() {}
+        let pwr = pac::PWR;
+        pwr.cr1().modify(|w| w.set_oden(true));
+        while !pwr.csr1().read().odrdy() {}
 
-        pwr.cr.modify(|_, w| w.odswen().set_bit());
-        while pwr.csr.read().odswrdy().bit_is_clear() {}
+        pwr.cr1().modify(|w| w.set_odswen(true));
+        while !pwr.csr1().read().odswrdy() {}
 
-        rcc.cfgr.write(|w| {
-            w.ppre2().div2();
-            w.ppre1().div4();
-            w.hpre().div1();
-            w
+        rcc.cfgr().write(|w| {
+            w.set_ppre2(pac::rcc::vals::Ppre::DIV2);
+            w.set_ppre1(pac::rcc::vals::Ppre::DIV4);
+            w.set_hpre(pac::rcc::vals::Hpre::DIV1);
         });
 
-        let flash = &periphs.FLASH;
-        flash.acr.write(|w| {
-            w.latency().bits(5);
-            w.icen().set_bit();
-            w.dcen().set_bit();
-            w.prften().set_bit();
-            w
+        let flash = pac::FLASH;
+        flash.acr().write(|w| {
+            w.set_latency(pac::flash::vals::Latency::WS5);
+            w.set_icen(true);
+            w.set_dcen(true);
+            w.set_prften(true);
         });
 
-        while rcc.cr.read().pllrdy().bit_is_clear() {}
 
-        rcc.cfgr.modify(|_, w| w.sw().pll());
+        rcc.cfgr().modify(|w| w.set_sw(pac::rcc::vals::Sw::PLL1_P));
+        while rcc.cfgr().read().sws() != pac::rcc::vals::Sw::PLL1_P {}
     }
 
-    fn setup_gpio(gpioe: &GPIOE) {
-        gpioe.odr.write(|w| w.odr1().set_bit());
-        gpioe.moder.write(|w| unsafe { w.bits(0x55555555) });
-        gpioe.ospeedr.write(|w| unsafe { w.bits(0xffffffff) });
+    fn setup_gpio() {
+        let gpioe = pac::GPIOE;
+        gpioe.odr().write(|w| w.set_odr(0, pac::gpio::vals::Odr::HIGH));
+        gpioe.moder().write(|w| w.0 = 0x55555555);
+        gpioe.ospeedr().write(|w| w.0 = 0xffffffff);
     }
 
-    fn setup_itm(core: &CorePeripherals, periphs: &Peripherals) {
-        periphs.GPIOB.moder.modify(|_, w| w.moder3().alternate());
-        periphs.GPIOB.afrl.modify(|_, w| w.afrl3().af0());
+    fn setup_itm() {
+        use pac::gpio::vals;
 
-        unsafe { core.TPIU.acpr.write(1) };
+        let gpioe = pac::GPIOE;
+        gpioe.moder().modify(|w| w.set_moder(3, vals::Moder::ALTERNATE));
+        gpioe.afr(0).modify(|w| w.set_afr(3, 0));
+
+        let tpiu = cortex_m::peripheral::TPIU::PTR;
+        unsafe { (*tpiu).acpr.write(1) };
     }
 
-    pub fn monotonic(&mut self) -> Scheduler {
-        self.mono.take().unwrap()
-    }
-
-    pub fn toggle(&self) {
-        self.gpioe
-            .odr
-            .modify(|r, w| w.odr1().bit(r.odr1().bit_is_clear()));
+    pub fn toggle() {
+        pac::GPIOE
+            .odr()
+            .modify(|w| 
+                if w.odr(0) == pac::gpio::vals::Odr::LOW {
+                    w.set_odr(0, pac::gpio::vals::Odr::HIGH);
+                } else {
+                    w.set_odr(0, pac::gpio::vals::Odr::LOW);
+                }
+            );
     }
 
     pub fn cycles() -> u32 {
-      unsafe { (*DWT::PTR).cyccnt.read() }
+      unsafe { (*cortex_m::peripheral::DWT::PTR).cyccnt.read() }
     }
 
     pub fn with_itm<F>(&mut self, f: F) 
     where F: FnOnce(&mut cortex_m::peripheral::itm::Stim) {
-        f(&mut self.itm.stim[0]);
+        let stim = unsafe { &mut ((*cortex_m::peripheral::ITM::PTR).stim[0]) };
+        f(stim);
     }
 
-    pub fn new(periphs: Peripherals, core: CorePeripherals) -> Self {
-        Stm32f427::setup_itm(&core, &periphs);
+    pub async fn delay(duration: <Self as Monotonic>::Duration) {
+        TIMER_QUEUE.delay(duration).await;
+    }
 
-        Stm32f427::enable_peripheral_clocks(&periphs.RCC);
-        Stm32f427::setup_clock(&periphs, 8);
-        Stm32f427::configure_tim8(&periphs.TIM8);
-        Stm32f427::configure_tim2(&periphs.TIM2);
-        Stm32f427::setup_gpio(&periphs.GPIOE);
+//    pub fn now() -> <Self as Monotonic>::Instant {
+//        <Self as Monotonic>::now()
+//    }
 
-        let mono = Scheduler::new(periphs.TIM2);
-        let plat = Stm32f427 {
-            mono: Some(mono),
-            gpioe: periphs.GPIOE,
-            itm: core.ITM,
-        };
+    pub fn init() {
+        Stm32f427::setup_itm();
 
-        let systick_mono_token = rtic_monotonics::create_systick_token!();
-        Systick::start(core.SYST, 168_000_000, systick_mono_token);
+        Stm32f427::enable_peripheral_clocks();
+        Stm32f427::setup_clock(8);
+        Stm32f427::configure_tim8();
+        Stm32f427::configure_tim2();
+        Stm32f427::setup_gpio();
 
-        plat
+        TIMER_QUEUE.initialize(Self {});
+
     }
 }

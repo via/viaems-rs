@@ -11,6 +11,7 @@ rtic-monotonics = { version = "1.0.0", features = ["cortex-m-systick"] }
 rtic-time = { version = "*" }
 
 stm32f4 = { version = "*", features = ["stm32f427"] }
+stm32-metapac = { version = "*", features=["stm32f427vg"] }
 panic-rtt-target = { version = "0.1.2", features = ["cortex-m"] }
 cortex-m = {version = "*", features=["inline-asm", "critical-section-single-core"]}
 rtt-target = { version = "0.4.0" }

@@ -12,18 +12,23 @@ use stm32f4::stm32f427 as pac;
 mod stm32f4xx;
 use stm32f4xx::Stm32f427 as platform;
 
+mod another;
+
+
 #[app(device = pac, peripherals = true, dispatchers = [SPI1, SPI2, SPI3])]
 mod app {
     use super::*;
 
+    use crate::another::exttest;
+
     #[shared]
-    struct Shared {
+    pub struct Shared {
         engine_position: EnginePosition,
         sensors: Sensors,
     }
 
     #[local]
-    struct Local {
+    pub struct Local {
         state: bool,
         logger_queue_receiver: Receiver<'static, LogMsg, 16>, 
         logger_queue_decoder_sender: Sender<'static, LogMsg, 16>, 
@@ -70,17 +75,16 @@ mod app {
 
     #[init]
     fn init(cx: init::Context) -> (Shared, Local) {
-
-
         rtt_init_print!();
         rprintln!("init");
 
         sim::spawn().unwrap();
         logger::spawn().unwrap();
+        exttest::spawn().unwrap();
 
         let (s, r) = make_channel!(LogMsg, 16);
 
-        let mut platform = platform::new(cx.device, cx.core);
+        platform::init();
 
         (Shared {
            engine_position: EnginePosition::default(),
@@ -131,8 +135,8 @@ mod app {
               Ok(LogMsg::DecodeMsg{orig_time, send_time}) => {
                   #[allow(deprecated)]
                   let cycles = cortex_m::peripheral::DWT::get_cycle_count();
-                  rprintln!("DecodeMsg: orig_time {} send_time {}",
-                      (cycles - orig_time), (send_time - orig_time));
+                  rprintln!("DecodeMsg: orig_time {} send_time {}, {}",
+                      (cycles - orig_time), (send_time - orig_time), (cycles - send_time));
 
               },
               Ok(LogMsg::EngineMsg{orig_time, send_time}) => {
@@ -150,6 +154,7 @@ mod app {
 
     #[task(local = [state], shared=[], priority=2)]
     async fn sim(cx: sim::Context) {
+        platform::toggle();
         loop {
             if *cx.local.state {
                 *cx.local.state = false;
@@ -159,7 +164,12 @@ mod app {
             #[allow(deprecated)]
             let cycles = cortex_m::peripheral::DWT::get_cycle_count();
             decode::spawn(Trigger{time: cycles, trigger: 0}).ok();
-            Systick::delay(1000.millis()).await;
+            platform::delay(1000.millis()).await;
         }
+    }
+
+    extern "Rust" {
+        #[task(priority = 1)]
+        async fn exttest(cx: exttest::Context);
     }
 }
