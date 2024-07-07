@@ -1,19 +1,31 @@
 use viaems::{self, interface, connection};
 
-use clap::{Parser, Subcommand};
+use clap::{ValueEnum, Args, Parser, Subcommand};
 use ctrlc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime};
 
 #[derive(Parser, Debug)]
-struct Args {
+struct CliArgs {
 #[command(subcommand)]
   command: CliCommands,
+
+#[arg(short = 'c', value_enum, default_value_t = ConnectionMode::Usb)]
+  mode: ConnectionMode,
+
 #[arg(short = 's', long, default_value = "127.0.0.1:5556")]
   udpsrc: String,
+
 #[arg(short = 'd', long, default_value = "127.0.0.1:5555")]
   udpdest: String,
 }
+
+#[derive(ValueEnum, Clone, Debug)]
+enum ConnectionMode {
+    Usb,
+    Udp,
+}
+
 
 #[derive(Subcommand, Debug)]
 enum CliCommands {
@@ -26,15 +38,28 @@ enum CliCommands {
 
 
 fn main() {
-  let args = Args::parse();
+  let args = CliArgs::parse();
+  let connection : Box<dyn connection::Connection + Send> = match args.mode {
+      ConnectionMode::Udp => Box::new(connection::UdpConnection::new(&args.udpsrc, &args.udpdest)),
+      ConnectionMode::Usb => Box::new(connection::UsbConnection::new()),
+  };
+
+  let manager = viaems::Manager::new(connection);
+
   match args.command {
-    CliCommands::Record{filename} => record(&filename, &args.udpsrc, &args.udpdest),
-    CliCommands::Bootloader => bootloader(),
+    CliCommands::Record{filename} => 
+        record(&filename, manager),
+    CliCommands::Bootloader => 
+        bootloader(manager),
   }
 
 }
 
-fn bootloader() {
+fn bootloader(manager: viaems::Manager) {
+    manager.blocking_command(
+        viaems::interface::Message::Request(
+            viaems::interface::RequestMessage::Bootloader
+        ));
 }
     
 
@@ -43,13 +68,10 @@ enum StatusMsg {
     FeedCount{count: u64, rate: f64},
 }
 
-fn record(filename: &str, udpsrc: &str, udpdest: &str) {
-//    let conn = Box::new(connection::UdpConnection::new(udpsrc, udpdest));
-    let conn = Box::new(connection::UsbConnection::new());
-    let g = viaems::Manager::new(conn);
+fn record(filename: &str, manager: viaems::Manager) {
     let (status_chan_tx, status_chan) = mpsc::channel::<StatusMsg>();
 
-    g.on_feed({
+    manager.on_feed({
       let status_chan_tx = status_chan_tx.clone();
       let mut writer : Option<viaems::LogFeedWriter> = None;
       let filename = filename.to_owned();
@@ -76,23 +98,6 @@ fn record(filename: &str, udpsrc: &str, udpdest: &str) {
         }
 
     }});
-
-    let getcmd = interface::RequestMessage::Structure{id: 5};
-    g.command(interface::Message::Request(getcmd),
-      |resp: interface::ResponseValue| {
-        println!("struct response: {:?}", resp);
-       }
-     );
-
-    for i in 1..=5 {
-      let ping = interface::RequestMessage::Ping{id: i};
-      g.command(interface::Message::Request(ping),
-        |resp: interface::ResponseValue| {
-          println!("ping response: {:?}", resp);
-         }
-       );
-      std::thread::sleep(Duration::from_millis(500));
-    }
 
     ctrlc::set_handler(move || status_chan_tx.send(StatusMsg::Terminate).unwrap() ).unwrap();
 

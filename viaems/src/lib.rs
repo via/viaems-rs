@@ -5,7 +5,7 @@ mod log;
 pub use log::LogFeedWriter;
 
 use std::thread;
-use std::sync::{Mutex, Arc};
+use std::sync::{Mutex, Arc, mpsc};
 use std::time::{Duration, SystemTime};
 use std::collections::VecDeque;
 
@@ -108,6 +108,16 @@ impl Manager {
             message: msg,
     };
     locked.commands.push_back(command);
+  }
+
+  pub fn blocking_command(&self, msg: interface::Message) -> interface::ResponseValue {
+      let (tx, rx) = mpsc::channel::<interface::ResponseValue>();
+
+      self.command(msg, move |resp: interface::ResponseValue| {
+          tx.send(resp).unwrap();
+      });
+
+      rx.recv().unwrap()
   }
 }
 

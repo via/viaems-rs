@@ -1,13 +1,15 @@
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
+use std::fmt;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "method")]
 #[serde(rename_all = "lowercase")]
 pub enum RequestMessage {
-  Ping { id: u32 },
-  Structure { id: u32 },
-  Get { id: u32, path: StructurePath },
+  Ping { id: i32 },
+  Structure { id: i32 },
+  Get { id: i32, path: StructurePath },
+  Bootloader,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -59,7 +61,7 @@ pub enum Message {
   Description { keys: Vec<String> },
   Feed { values: Vec<FeedValue> },
   Request(RequestMessage),
-  Response{ id: u32, response: ResponseValue },
+  Response{ id: i32, response: ResponseValue },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -67,6 +69,15 @@ pub enum Message {
 pub enum FeedValue {
   Int(u32),
   Float(f32),
+}
+
+impl fmt::Display for FeedValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+          FeedValue::Int(x) => write!(f, "{}", x),
+          FeedValue::Float(x) => write!(f, "{}", x),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

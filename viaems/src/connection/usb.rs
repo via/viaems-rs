@@ -39,7 +39,7 @@ impl UsbConnection {
 //                }
 //            }});
         let context = Context::new().unwrap();
-        let mut devh = context.open_device_with_vid_pid(0x0483, 0x5740).expect("Could not open device");
+        let mut devh = context.open_device_with_vid_pid(0x1209, 0x2041).expect("Could not open device");
         for i in 0..=2 {
             if devh.kernel_driver_active(i).unwrap() {
                 devh.detach_kernel_driver(i).expect("Could not detach kernel from device");
@@ -57,7 +57,7 @@ impl UsbConnection {
                 for _ in 1..=4 {
                     let mut buf : Vec<u8> = vec![];
                     buf.reserve(16384);
-                    pool.submit_bulk(0x82, buf).unwrap();
+                    pool.submit_bulk(0x81, buf).unwrap();
                 }
                 loop {
                     if !running.load(atomic::Ordering::Relaxed) {
@@ -69,7 +69,7 @@ impl UsbConnection {
                               Ok(payload) => {
                                 let time = SystemTime::now();
                                 if recv_tx.send(RxMessage{time, payload}).is_err() { break; }
-                                pool.submit_bulk(0x82, bytes).unwrap();
+                                pool.submit_bulk(0x81, bytes).unwrap();
                               },
                               Err(e) => println!("Failed to decode! {e}"),
                             }
@@ -94,7 +94,7 @@ impl UsbConnection {
                     match send_rx.recv_timeout(Duration::from_millis(100)) {
                         Ok(msg) => {
                             let bytes = serde_cbor::to_vec(&msg).unwrap();
-                            devh.write_bulk(0x01, &bytes[..], Duration::from_secs(1)).unwrap();
+                            devh.write_bulk(0x03, &bytes[..], Duration::from_secs(1)).unwrap();
                         }
                         Err(mpsc::RecvTimeoutError::Timeout) => continue,
                         _ => break,
