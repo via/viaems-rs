@@ -10,4 +10,5 @@ publish = false
 
 [dependencies]
 eframe = "*"
+rfd = "0.14"
 viaems = { path = "../viaems" }
