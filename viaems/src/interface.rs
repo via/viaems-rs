@@ -57,11 +57,21 @@ pub enum ResponseValue {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "lowercase")]
 #[serde(tag = "type")]
+pub enum Event {
+  Output{ outputs: u32 },
+  Gpio{ outputs: u32 },
+  Trigger{ pin: u32 },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "lowercase")]
+#[serde(tag = "type")]
 pub enum Message {
   Description { keys: Vec<String> },
   Feed { values: Vec<FeedValue> },
   Request(RequestMessage),
   Response{ id: i32, response: ResponseValue },
+  Event{ time: u32, seq: u32, event: Event },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

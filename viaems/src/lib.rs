@@ -3,6 +3,7 @@ pub mod connection;
 mod log;
 
 pub use log::LogFeedWriter;
+pub use log::LogReader;
 
 use std::thread;
 use std::sync::{Mutex, Arc, mpsc};

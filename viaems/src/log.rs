@@ -110,3 +110,21 @@ impl LogFeedWriter {
     }
 }
 
+pub struct LogReader {
+  conn: sqlite::Connection,
+  filename: String,
+}
+
+impl LogReader {
+    pub fn new(filename: &str) -> LogReader {
+        let conn = sqlite::open(filename).unwrap();
+        LogReader{ 
+            conn, 
+            filename: filename.to_owned(),
+        }
+    }
+
+    pub fn filename(&self) -> &str {
+        &self.filename
+    }
+}
