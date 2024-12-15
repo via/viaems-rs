@@ -4,6 +4,7 @@ mod log;
 
 pub use log::LogFeedWriter;
 pub use log::LogReader;
+pub use log::LogChunk;
 
 use std::thread;
 use std::sync::{Mutex, Arc, mpsc};

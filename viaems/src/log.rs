@@ -1,6 +1,7 @@
 use std::sync::mpsc;
 use std::thread;
 use std::time::SystemTime;
+use std::collections::HashMap;
 use sqlite;
 
 use crate::interface;
@@ -115,6 +116,12 @@ pub struct LogReader {
   filename: String,
 }
 
+#[derive(Default)]
+pub struct LogChunk {
+    pub times: Vec<i64>,
+    data: HashMap<String, Vec<f64>>,
+}
+
 impl LogReader {
     pub fn new(filename: &str) -> LogReader {
         let conn = sqlite::open(filename).unwrap();
@@ -127,4 +134,50 @@ impl LogReader {
     pub fn filename(&self) -> &str {
         &self.filename
     }
+
+    pub fn keys(&self) -> Vec<String> {
+        let mut keys : Vec<String> = vec![];
+        for row in self.conn.prepare("PRAGMA TABLE_INFO(points);").unwrap().into_iter().map(|r| r.unwrap()) {
+            keys.push(row.read::<&str, _>("name").to_string());
+        }
+
+        keys
+    }
+
+    pub fn get_range(&self, start: SystemTime, stop: SystemTime, keys: &[&str]) -> LogChunk {
+        let start_ns = start.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as i64;
+        let stop_ns = stop.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as i64;
+
+        let key_cols = keys
+            .iter()
+            .map(|x| format!("`{x}`"))
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        let mut query = "SELECT realtime_ns, ".to_owned();
+        query += &key_cols;
+        query += " FROM points where realtime_ns > ? and realtime_ns < ? ORDER BY realtime_ns";
+
+        let mut chunk = LogChunk::default();
+        let mut stmt = self.conn.prepare(query).unwrap();
+        stmt.bind((1, start_ns)).unwrap();
+        stmt.bind((2, stop_ns)).unwrap();
+        for row in stmt.into_iter().map(|r| r.unwrap()) {
+            chunk.times.push(row.read::<i64, _>(0));
+            for (idx, &k) in keys.iter().enumerate() {
+                let value = row.try_read::<f64, _>(idx + 1)        // First try to parse f64
+                    .or_else(|_| row.try_read::<i64, _>(idx + 1).map(|x| x as f64)) // Otherwise parse int and cast
+                    .unwrap();
+                if let Some(x) = chunk.data.get_mut(k) {
+                    x.push(value);
+                } else {
+                    chunk.data.insert(k.to_owned(), vec![value]);
+                }
+            }
+
+        }
+
+        chunk
+    }
+
 }

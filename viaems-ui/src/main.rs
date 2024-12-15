@@ -1,10 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use eframe::egui;
+use egui_plot::Plot;
 use rfd;
 use viaems::{self, interface, connection};
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
+use std::time::{SystemTime, Instant};
 
 #[derive(Default)]
 struct FeedState {
@@ -17,16 +18,35 @@ struct Application {
     target: Option<viaems::Manager>,
     log: Option<viaems::LogReader>,
     latest_feed: Arc<Mutex<FeedState>>,
+
+    points_cache: viaems::LogChunk,
 }
 
 impl Application {
     fn new() -> Application { 
         let feed = Arc::new(Mutex::new(FeedState::default()));
-        Application{ target: None, log: None , latest_feed: feed} 
+        Application{ 
+            target: None, 
+            log: None , 
+            latest_feed: feed,
+            points_cache: viaems::LogChunk::default(),
+        } 
     }
 
     fn open_log(&mut self, filename: &str) {
         self.log = Some(viaems::LogReader::new(filename));
+        println!("Opening log");
+        let before = Instant::now();
+        if let Some(log) = &self.log {
+            self.points_cache = log.get_range(
+                    SystemTime::UNIX_EPOCH,
+                    SystemTime::now(), 
+                    &["rpm", "sensor.map"]
+                );
+        }
+        let after = Instant::now();
+        println!("Got {} points in {} ms", self.points_cache.times.len(),
+            (after - before).as_millis());
     }
 
     fn connect_udp(&mut self) {
@@ -73,12 +93,14 @@ fn main() -> Result<(), eframe::Error> {
                         if let Some(path) = rfd::FileDialog::new().pick_file() {
                             let picked_path = path.display().to_string();
                             state.open_log(&picked_path);
+                            ui.close_menu();
                         }
                     }
                 });
-                ui.menu_button("_Target", |ui| {
+                ui.menu_button("Target", |ui| {
                     if ui.button("Open UDP").clicked() {
                             state.connect_udp();
+                            ui.close_menu();
                     }
                 });
             });
@@ -112,7 +134,8 @@ fn main() -> Result<(), eframe::Error> {
             };
         });
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("TODO");
+           Plot::new("logview").view_aspect(2.0).show(ui, |plot_ui| {
+           });
         });
         ctx.request_repaint();
     })

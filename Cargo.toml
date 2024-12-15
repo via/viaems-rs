@@ -6,6 +6,7 @@ members = [
   "viaems-firmware"
 ]
 
+
 [profile.dev]
 opt-level = 0
 codegen-units = 16
