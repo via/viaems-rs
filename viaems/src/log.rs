@@ -122,9 +122,13 @@ pub struct LogChunk {
     data: HashMap<String, Vec<f64>>,
 }
 
+
+
 impl LogReader {
     pub fn new(filename: &str) -> LogReader {
-        let conn = sqlite::open(filename).unwrap();
+        let conn = sqlite::Connection::open_with_flags(filename,
+            sqlite::OpenFlags::default().with_read_write().with_no_mutex()
+            ).unwrap();
         LogReader{ 
             conn, 
             filename: filename.to_owned(),
@@ -143,6 +147,32 @@ impl LogReader {
 
         keys
     }
+
+    pub fn get_range_row<F>(&self, start: SystemTime, stop: SystemTime, keys: &[&str], mut f: F) 
+        where F: FnMut(sqlite::Row) -> ()
+    {
+
+        let start_ns = start.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as i64;
+        let stop_ns = stop.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as i64;
+
+        let key_cols = keys
+            .iter()
+            .map(|x| format!("`{x}`"))
+            .collect::<Vec<String>>()
+            .join(", ");
+
+        let mut query = "SELECT realtime_ns, ".to_owned();
+        query += &key_cols;
+        query += " FROM points where realtime_ns > ? and realtime_ns < ? ORDER BY realtime_ns";
+
+        let mut stmt = self.conn.prepare(query).unwrap();
+        stmt.bind((1, start_ns)).unwrap();
+        stmt.bind((2, stop_ns)).unwrap();
+        for row in stmt.into_iter().map(|r| r.unwrap()) {
+            f(row);
+        }
+    }
+
 
     pub fn get_range(&self, start: SystemTime, stop: SystemTime, keys: &[&str]) -> LogChunk {
         let start_ns = start.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as i64;

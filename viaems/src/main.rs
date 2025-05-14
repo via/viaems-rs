@@ -34,25 +34,58 @@ enum CliCommands {
     filename: String, 
   },
   Bootloader,
+  Read {
+      filename: String,
+  }
 }
 
 
 fn main() {
   let args = CliArgs::parse();
-  let connection : Box<dyn connection::Connection + Send> = match args.mode {
-      ConnectionMode::Udp => Box::new(connection::UdpConnection::new(&args.udpsrc, &args.udpdest)),
-      ConnectionMode::Usb => Box::new(connection::UsbConnection::new()),
-  };
-
-  let manager = viaems::Manager::new(connection);
 
   match args.command {
-    CliCommands::Record{filename} => 
-        record(&filename, manager),
-    CliCommands::Bootloader => 
-        bootloader(manager),
+    CliCommands::Record{filename} => {
+        let connection : Box<dyn connection::Connection + Send> = match args.mode {
+            ConnectionMode::Udp => Box::new(connection::UdpConnection::new(&args.udpsrc, &args.udpdest)),
+            ConnectionMode::Usb => Box::new(connection::UsbConnection::new()),
+        };
+
+        let manager = viaems::Manager::new(connection);
+        record(&filename, manager)
+    },
+    CliCommands::Bootloader => {
+        let connection : Box<dyn connection::Connection + Send> = match args.mode {
+            ConnectionMode::Udp => Box::new(connection::UdpConnection::new(&args.udpsrc, &args.udpdest)),
+            ConnectionMode::Usb => Box::new(connection::UsbConnection::new()),
+        };
+
+        let manager = viaems::Manager::new(connection);
+        bootloader(manager)
+    },
+    CliCommands::Read { filename } => read(&filename),
+
   }
 
+}
+
+fn read(filename: &str) {
+
+
+  let reader = viaems::LogReader::new(filename);
+  let mut count = 0;
+//  reader.get_range_row(
+//      SystemTime::UNIX_EPOCH,
+//      SystemTime::now(), 
+//      &["rpm", "sensor.map"],
+//      |_| {
+//          count += 1;
+//      });
+  let chunk = reader.get_range(
+      SystemTime::UNIX_EPOCH,
+      SystemTime::now(), 
+      &["rpm", "sensor.map"]);
+  count = chunk.times.len();
+  println!("Read {} rows", count);
 }
 
 fn bootloader(manager: viaems::Manager) {
