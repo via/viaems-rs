@@ -1,12 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
+use clap::Parser;
 use eframe::egui;
 use egui_file::FileDialog;
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime};
 use viaems::{self, connection, interface};
 
-use clap::Parser;
+mod view_cache;
 
 #[derive(Default)]
 struct FeedState {
@@ -20,40 +21,28 @@ struct Application {
     log: Option<viaems::LogReader>,
     latest_feed: Arc<Mutex<FeedState>>,
 
-    points_cache: viaems::LogChunk,
+    view: view_cache::ViewCache,
     file_dialog: FileDialog,
 }
 
 impl Application {
     fn new() -> Application {
         let feed = Arc::new(Mutex::new(FeedState::default()));
-        let dialog = FileDialog::open_file(None);
+        let cwd = std::env::current_dir().ok();
+        let dialog = FileDialog::open_file(cwd);
         Application {
             target: None,
             log: None,
             latest_feed: feed,
-            points_cache: viaems::LogChunk::default(),
+            view: view_cache::ViewCache::new(),
             file_dialog: dialog,
         }
     }
 
     fn open_log(&mut self, filename: &str) {
         self.log = Some(viaems::LogReader::new(filename));
+        self.view.set_logreader(viaems::LogReader::new(filename));
         println!("Opening log");
-        let before = Instant::now();
-        if let Some(log) = &self.log {
-            self.points_cache = log.get_range(
-                SystemTime::UNIX_EPOCH,
-                SystemTime::now(),
-                &["rpm", "sensor.map", "sensor.ego"],
-            );
-        }
-        let after = Instant::now();
-        println!(
-            "Got {} points in {} ms",
-            self.points_cache.times.len(),
-            (after - before).as_millis()
-        );
     }
 
     fn connect_udp(&mut self) {
@@ -112,19 +101,14 @@ fn main() -> Result<(), eframe::Error> {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("Log", |ui| {
                     if ui.button("Open log").clicked() {
-                        //                        if let Some(path) = rfd::FileDialog::new().pick_file() {
-                        //                            let picked_path = path.display().to_string();
-                        //                            state.open_log(&picked_path);
-                        //                            ui.close_menu();
-                        //                        }
                         state.file_dialog.open();
+                        ui.close_menu();
                     }
                 });
                 if state.file_dialog.show(ctx).selected() {
                     if let Some(path) = state.file_dialog.path() {
                         let path = path.to_path_buf();
                         state.open_log(path.to_str().unwrap());
-                        ui.close_menu();
                     }
                 }
                 ui.menu_button("Target", |ui| {
@@ -160,7 +144,17 @@ fn main() -> Result<(), eframe::Error> {
             };
             match &state.log {
                 None => ui.label("Log: Not connected"),
-                Some(log) => ui.label("Log: ".to_owned() + log.filename()),
+                Some(log) => {
+                    let mut log_str = format!("Log: {}", log.filename());
+                    let viewstat = state.view.get_status();
+                    match viewstat {
+                        view_cache::LoadingStatus::Done => log_str += " Loaded",
+                        view_cache::LoadingStatus::Loading { progress } => {
+                            log_str += &format!(" {:.0}%", progress)
+                        }
+                    }
+                    ui.label(log_str)
+                }
             };
         });
         egui::CentralPanel::default().show(ctx, |ui| {});

@@ -1,6 +1,6 @@
 use std::sync::mpsc;
 use std::thread;
-use std::time::SystemTime;
+use std::time::{SystemTime, Duration};
 use std::collections::HashMap;
 use sqlite;
 
@@ -118,8 +118,35 @@ pub struct LogReader {
 
 #[derive(Default)]
 pub struct LogChunk {
+    pub keys: Vec<String>,
     pub times: Vec<i64>,
-    data: HashMap<String, Vec<f64>>,
+    pub data: Vec<Vec<f64>>,
+}
+
+impl LogChunk {
+    pub fn new(keys: &[&str]) -> LogChunk {
+        let mut chunk = LogChunk {
+            keys: keys.iter().map(|x| x.to_string()).collect(),
+            times: vec![],
+            data: vec![],
+        };
+        chunk.data.resize(keys.len(), vec![]);
+        chunk
+    }
+
+    pub fn add(&mut self, time: i64, values: &[f64]) {
+        self.times.push(time);
+        for (idx, v) in values.iter().enumerate() {
+            self.data[idx].push(*v)
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.times.clear();
+        for col in &mut self.data {
+            col.clear();
+        }
+    }
 }
 
 
@@ -148,8 +175,23 @@ impl LogReader {
         keys
     }
 
-    pub fn get_range_row<F>(&self, start: SystemTime, stop: SystemTime, keys: &[&str], mut f: F) 
-        where F: FnMut(sqlite::Row) -> ()
+    pub fn get_range_count(&self, start: SystemTime, stop: SystemTime) -> usize {
+        let start_ns = start.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as i64;
+        let stop_ns = stop.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as i64;
+
+        let query = "SELECT count(realtime_ns) FROM points where realtime_ns > ? and realtime_ns < ?";
+        let mut stmt = self.conn.prepare(query).unwrap();
+        stmt.bind((1, start_ns)).unwrap();
+        stmt.bind((2, stop_ns)).unwrap();
+        if let Some(Ok(row)) = stmt.into_iter().next() {
+            row.read::<i64, _>(0).try_into().expect("row count not valid number")
+        } else {
+            0
+        }
+    }
+
+    pub fn range_foreach<F>(&self, start: SystemTime, stop: SystemTime, keys: &[&str], mut f: F) 
+        where F: FnMut(i64, &Vec<f64>) -> bool
     {
 
         let start_ns = start.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as i64;
@@ -168,46 +210,57 @@ impl LogReader {
         let mut stmt = self.conn.prepare(query).unwrap();
         stmt.bind((1, start_ns)).unwrap();
         stmt.bind((2, stop_ns)).unwrap();
+        let mut values = vec![];
         for row in stmt.into_iter().map(|r| r.unwrap()) {
-            f(row);
+            let time = row.read::<i64, _>(0);
+            values.clear();
+            for i in 1..=keys.len() {
+                let value = row
+                    .try_read::<f64, _>(i)
+                    .or_else(|_| row.try_read::<i64, _>(i).map(|x| x as f64))
+                    .unwrap();
+                values.push(value);
+            }
+            if !f(time, &values) { break; }
         }
     }
 
 
     pub fn get_range(&self, start: SystemTime, stop: SystemTime, keys: &[&str]) -> LogChunk {
-        let start_ns = start.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as i64;
-        let stop_ns = stop.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as i64;
 
-        let key_cols = keys
-            .iter()
-            .map(|x| format!("`{x}`"))
-            .collect::<Vec<String>>()
-            .join(", ");
-
-        let mut query = "SELECT realtime_ns, ".to_owned();
-        query += &key_cols;
-        query += " FROM points where realtime_ns > ? and realtime_ns < ? ORDER BY realtime_ns";
-
-        let mut chunk = LogChunk::default();
-        let mut stmt = self.conn.prepare(query).unwrap();
-        stmt.bind((1, start_ns)).unwrap();
-        stmt.bind((2, stop_ns)).unwrap();
-        for row in stmt.into_iter().map(|r| r.unwrap()) {
-            chunk.times.push(row.read::<i64, _>(0));
-            for (idx, &k) in keys.iter().enumerate() {
-                let value = row.try_read::<f64, _>(idx + 1)        // First try to parse f64
-                    .or_else(|_| row.try_read::<i64, _>(idx + 1).map(|x| x as f64)) // Otherwise parse int and cast
-                    .unwrap();
-                if let Some(x) = chunk.data.get_mut(k) {
-                    x.push(value);
-                } else {
-                    chunk.data.insert(k.to_owned(), vec![value]);
-                }
-            }
-
-        }
+        let mut chunk = LogChunk::new(keys);
+        self.range_foreach(start, stop, keys, |time, values| {
+            chunk.add(time, values);
+            true
+        });
 
         chunk
     }
 
+    // TODO Learn out how to use ? shorthand to get rid of the unwraps
+    pub fn get_earliest_time(&self) -> Option<SystemTime> {
+        let query = "SELECT realtime_ns from points order by realtime_ns asc limit 1";
+        let stmt = self.conn.prepare(query).unwrap();
+        if let Some(Ok(r)) = stmt.into_iter().next() {
+            let time_ns = r.try_read::<i64, _>(0).unwrap();
+            let duration = Duration::from_nanos(time_ns.try_into().unwrap());
+            let time = SystemTime::UNIX_EPOCH.checked_add(duration).unwrap();
+            return Some(time);
+        } else {
+            return None;
+        }
+    }
+
+    pub fn get_latest_time(&self) -> Option<SystemTime> {
+        let query = "SELECT realtime_ns from points order by realtime_ns desc limit 1";
+        let stmt = self.conn.prepare(query).unwrap();
+        if let Some(Ok(r)) = stmt.into_iter().next() {
+            let time_ns = r.try_read::<i64, _>(0).unwrap();
+            let duration = Duration::from_nanos(time_ns.try_into().unwrap());
+            let time = SystemTime::UNIX_EPOCH.checked_add(duration).unwrap();
+            return Some(time);
+        } else {
+            return None;
+        }
+    }
 }
