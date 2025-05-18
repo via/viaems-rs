@@ -1,10 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use clap::Parser;
-use eframe::egui;
+use eframe::egui::accesskit::Rect;
+use eframe::egui::{self, Pos2};
 use egui_file::FileDialog;
+use emath::RectTransform;
+use std::ops::Index;
 use std::sync::{Arc, Mutex};
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use viaems::{self, connection, interface};
 
 mod view_cache;
@@ -137,6 +140,41 @@ fn main() -> Result<(), eframe::Error> {
                 });
             });
         }
+        let mut point_count = 0;
+        let mut draw_time = Duration::from_secs(0);
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let painter = ui.painter();
+            let stroke = egui::Stroke::new(1.0, egui::Color32::RED);
+            state.view.with_cache100(|log| {
+                if let Some(map_idx) = log.keys.iter().position(|x| x == "rpm") {
+                    point_count = log.times.len();
+                    let drawrect = ui.max_rect();
+                    let first_time = *log.times.first().unwrap();
+                    let last_time = *log.times.last().unwrap();
+
+                    let normal_rect =
+                        egui::Rect::from_min_max(Pos2 { x: 0.0, y: 0.0 }, Pos2 { x: 1.0, y: 1.0 });
+                    let tf = RectTransform::from_to(normal_rect, drawrect);
+
+                    let before = SystemTime::now();
+                    for (idx, time) in log.times.iter().enumerate() {
+                        let v = log.data[map_idx][idx];
+
+                        let normal_time =
+                            (time - first_time) as f64 / (last_time - first_time) as f64;
+                        let normal_rpm = v / 6000.0;
+
+                        let point = tf.transform_pos(Pos2 {
+                            x: normal_time as f32,
+                            y: normal_rpm as f32,
+                        });
+                        painter.circle(point.clone(), 1.0, egui::Color32::RED, stroke);
+                    }
+                    let after = SystemTime::now();
+                    draw_time = after.duration_since(before).unwrap();
+                }
+            });
+        });
         egui::TopBottomPanel::bottom("Status").show(ctx, |ui| {
             match &state.target {
                 None => ui.label("Target: Not connected"),
@@ -153,11 +191,15 @@ fn main() -> Result<(), eframe::Error> {
                             log_str += &format!(" {:.0}%", progress)
                         }
                     }
-                    ui.label(log_str)
+                    ui.label(log_str);
+                    ui.label(format!(
+                        "View: {} points in {} ms",
+                        point_count,
+                        draw_time.as_millis()
+                    ))
                 }
             };
         });
-        egui::CentralPanel::default().show(ctx, |ui| {});
         ctx.request_repaint();
     })
 }

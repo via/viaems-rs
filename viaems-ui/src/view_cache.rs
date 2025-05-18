@@ -3,7 +3,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
-use viaems;
+use viaems::{self, LogChunk};
 
 #[derive(Clone)]
 pub enum LoadingStatus {
@@ -58,7 +58,6 @@ struct Backend {
     state: Arc<Mutex<ViewSharedState>>,
     cmd_chan: mpsc::Receiver<ViewBackendCommand>,
     reader: Option<viaems::LogReader>,
-    last_status_update: SystemTime,
 }
 
 impl Backend {
@@ -76,14 +75,6 @@ impl Backend {
                     self.reader = Some(r);
                 }
             }
-        }
-    }
-
-    fn update_status(&mut self, status: LoadingStatus) {
-        let now = SystemTime::now();
-        if now.duration_since(self.last_status_update).unwrap() > Duration::from_millis(10) {
-            self.state.lock().unwrap().status = status;
-            self.last_status_update = now;
         }
     }
 
@@ -107,15 +98,28 @@ impl Backend {
 
         let total_count = reader.get_range_count(start, stop);
         let mut count = 0;
+
         let mut chunk = viaems::LogChunk::new(&refkeys);
+        let mut chunk10 = viaems::LogChunk::new(&refkeys);
+        let mut chunk100 = viaems::LogChunk::new(&refkeys);
         let before = SystemTime::now();
         reader.range_foreach(start, stop, &refkeys, |time, values| -> bool {
             chunk.add(time, values);
-
             count += 1;
 
-            //            let percent = 100.0 * count as f32 / total_count as f32;
-            self.update_status(LoadingStatus::Loading { progress: 10.0 });
+            // TODO real decimation algorithm
+            if count % 10 == 0 {
+                chunk10.add(time, values);
+            }
+
+            if count % 100 == 0 {
+                chunk100.add(time, values);
+            }
+
+            if count % 10000 == 0 {
+                let percent = 100.0 * count as f32 / total_count as f32;
+                self.state.lock().unwrap().status = LoadingStatus::Loading { progress: percent };
+            }
 
             true
         });
@@ -126,9 +130,13 @@ impl Backend {
             (after.duration_since(before).unwrap().as_millis())
         );
 
-        self.state.lock().unwrap().cache = chunk;
-
-        self.state.lock().unwrap().status = LoadingStatus::Done;
+        {
+            let mut state = self.state.lock().unwrap();
+            state.cache = chunk;
+            state.cache10 = chunk10;
+            state.cache100 = chunk100;
+            state.status = LoadingStatus::Done;
+        }
     }
 }
 
@@ -155,7 +163,6 @@ impl ViewCache {
                     state: shared_state.clone(),
                     cmd_chan: cmd_chan_rx,
                     reader: None,
-                    last_status_update: SystemTime::now(),
                 };
                 move || {
                     backend.backend_render_loop();
@@ -172,7 +179,14 @@ impl ViewCache {
     pub fn get_status(&self) -> LoadingStatus {
         self.state.lock().unwrap().status.clone()
     }
-    pub fn render(&mut self) -> () {}
+
+    pub fn with_cache100<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&viaems::LogChunk),
+    {
+        let state = self.state.lock().unwrap();
+        f(&state.cache100);
+    }
 
     pub fn set_logreader(&mut self, reader: viaems::LogReader) {
         self.cmd_chan

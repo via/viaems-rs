@@ -154,7 +154,7 @@ impl LogChunk {
 impl LogReader {
     pub fn new(filename: &str) -> LogReader {
         let conn = sqlite::Connection::open_with_flags(filename,
-            sqlite::OpenFlags::default().with_read_write().with_no_mutex()
+            sqlite::OpenFlags::default().with_read_only().with_no_mutex()
             ).unwrap();
         LogReader{ 
             conn, 
