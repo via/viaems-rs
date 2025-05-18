@@ -26,6 +26,8 @@ struct Application {
 
     view: view_cache::ViewCache,
     file_dialog: FileDialog,
+
+    last_update_time: SystemTime,
 }
 
 impl Application {
@@ -39,6 +41,7 @@ impl Application {
             latest_feed: feed,
             view: view_cache::ViewCache::new(),
             file_dialog: dialog,
+            last_update_time: SystemTime::now(),
         }
     }
 
@@ -99,6 +102,9 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_simple_native("Viaems UI", options, move |ctx, _frame| {
         ctx.set_visuals(egui::Visuals::light());
         ctx.set_pixels_per_point(1.5);
+        let now = SystemTime::now();
+        let render_time = now.duration_since(state.last_update_time).unwrap();
+        state.last_update_time = now;
 
         egui::TopBottomPanel::top("Menubar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
@@ -141,7 +147,6 @@ fn main() -> Result<(), eframe::Error> {
             });
         }
         let mut point_count = 0;
-        let mut draw_time = Duration::from_secs(0);
         egui::CentralPanel::default().show(ctx, |ui| {
             let painter = ui.painter();
             let stroke = egui::Stroke::new(1.0, egui::Color32::RED);
@@ -156,7 +161,6 @@ fn main() -> Result<(), eframe::Error> {
                         egui::Rect::from_min_max(Pos2 { x: 0.0, y: 0.0 }, Pos2 { x: 1.0, y: 1.0 });
                     let tf = RectTransform::from_to(normal_rect, drawrect);
 
-                    let before = SystemTime::now();
                     for (idx, time) in log.times.iter().enumerate() {
                         let v = log.data[map_idx][idx];
 
@@ -168,10 +172,8 @@ fn main() -> Result<(), eframe::Error> {
                             x: normal_time as f32,
                             y: normal_rpm as f32,
                         });
-                        painter.circle(point.clone(), 1.0, egui::Color32::RED, stroke);
+                        painter.line_segment([point.clone(), point.clone()], stroke);
                     }
-                    let after = SystemTime::now();
-                    draw_time = after.duration_since(before).unwrap();
                 }
             });
         });
@@ -195,7 +197,7 @@ fn main() -> Result<(), eframe::Error> {
                     ui.label(format!(
                         "View: {} points in {} ms",
                         point_count,
-                        draw_time.as_millis()
+                        render_time.as_millis()
                     ))
                 }
             };

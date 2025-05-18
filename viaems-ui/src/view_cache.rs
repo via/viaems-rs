@@ -40,6 +40,7 @@ struct ViewSharedState {
     cache: viaems::LogChunk,
     cache10: viaems::LogChunk,
     cache100: viaems::LogChunk,
+    cache1000: viaems::LogChunk,
 }
 
 pub struct ViewCache {
@@ -83,6 +84,7 @@ impl Backend {
         state.cache.clear();
         state.cache10.clear();
         state.cache100.clear();
+        state.cache1000.clear();
     }
 
     fn build_decimations(&mut self, reader: &viaems::LogReader) {
@@ -102,9 +104,10 @@ impl Backend {
         let mut chunk = viaems::LogChunk::new(&refkeys);
         let mut chunk10 = viaems::LogChunk::new(&refkeys);
         let mut chunk100 = viaems::LogChunk::new(&refkeys);
+        let mut chunk1000 = viaems::LogChunk::new(&refkeys);
         let before = SystemTime::now();
         reader.range_foreach(start, stop, &refkeys, |time, values| -> bool {
-            chunk.add(time, values);
+            //            chunk.add(time, values);
             count += 1;
 
             // TODO real decimation algorithm
@@ -117,6 +120,7 @@ impl Backend {
             }
 
             if count % 10000 == 0 {
+                chunk1000.add(time, values);
                 let percent = 100.0 * count as f32 / total_count as f32;
                 self.state.lock().unwrap().status = LoadingStatus::Loading { progress: percent };
             }
@@ -135,6 +139,7 @@ impl Backend {
             state.cache = chunk;
             state.cache10 = chunk10;
             state.cache100 = chunk100;
+            state.cache1000 = chunk1000;
             state.status = LoadingStatus::Done;
         }
     }
@@ -153,6 +158,7 @@ impl ViewCache {
             cache: viaems::LogChunk::default(),
             cache10: viaems::LogChunk::default(),
             cache100: viaems::LogChunk::default(),
+            cache1000: viaems::LogChunk::default(),
         }));
         let (cmd_chan_tx, cmd_chan_rx) = mpsc::channel::<ViewBackendCommand>();
         let backend_thread = thread::Builder::new()
