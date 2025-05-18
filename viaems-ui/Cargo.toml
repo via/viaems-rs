@@ -8,10 +8,10 @@ rust-version = "1.72"
 publish = false
 
 [dependencies]
-eframe = "*"
-emath = "*"
-egui_plot = "*"
-egui_file = "*"
+egui = "0.31"
+eframe = "0.31"
+emath = "0.31"
+egui_file = "0.22"
 clap = { version = "4.4.12", features = ["derive"] }
 
 viaems = { path = "../viaems" }

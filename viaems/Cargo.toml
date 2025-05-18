@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-serde_cbor = "0.11.2"
-serde = {version = "*", features = ["derive"]}
-sqlite = {version = "*", features = ["bundled"]}
-clap = { version = "4.4.12", features = ["derive"] }
-ctrlc = "3.4.2"
+serde_cbor = "0.11"
+serde = {version = "1.0", features = ["derive"]}
+sqlite = {version = "0.37", features = ["bundled"]}
+clap = { version = "4.4", features = ["derive"] }
+ctrlc = "3.4"
 rusb = "0.9.3"
 rusb-async = "0.0.1-alpha"
