@@ -116,7 +116,7 @@ pub struct LogReader {
   filename: String,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct LogChunk {
     pub keys: Vec<String>,
     pub times: Vec<i64>,

@@ -119,10 +119,19 @@ impl Backend {
                 chunk100.add(time, values);
             }
 
-            if count % 10000 == 0 {
+            if count % 1000 == 0 {
                 chunk1000.add(time, values);
+            }
+
+            if count % 100000 == 0 {
                 let percent = 100.0 * count as f32 / total_count as f32;
-                self.state.lock().unwrap().status = LoadingStatus::Loading { progress: percent };
+                {
+                    let mut state = self.state.lock().unwrap();
+                    state.cache10 = chunk10.clone();
+                    state.cache100 = chunk100.clone();
+                    state.cache1000 = chunk1000.clone();
+                    state.status = LoadingStatus::Loading { progress: percent };
+                }
             }
 
             true
@@ -191,7 +200,7 @@ impl ViewCache {
         F: FnMut(&viaems::LogChunk),
     {
         let state = self.state.lock().unwrap();
-        f(&state.cache100);
+        f(&state.cache1000);
     }
 
     pub fn set_logreader(&mut self, reader: viaems::LogReader) {

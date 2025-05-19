@@ -2,9 +2,11 @@
 
 use clap::Parser;
 use eframe::egui::accesskit::Rect;
+use eframe::egui::containers::Frame;
 use eframe::egui::{self, Pos2};
 use egui_file::FileDialog;
 use emath::RectTransform;
+use epaint;
 use std::ops::Index;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
@@ -148,33 +150,35 @@ fn main() -> Result<(), eframe::Error> {
         }
         let mut point_count = 0;
         egui::CentralPanel::default().show(ctx, |ui| {
-            let painter = ui.painter();
-            let stroke = egui::Stroke::new(1.0, egui::Color32::RED);
-            state.view.with_cache100(|log| {
-                if let Some(map_idx) = log.keys.iter().position(|x| x == "rpm") {
-                    point_count = log.times.len();
-                    let drawrect = ui.max_rect();
-                    let first_time = *log.times.first().unwrap();
-                    let last_time = *log.times.last().unwrap();
+            Frame::canvas(ui.style()).show(ui, |ui| {
+                let stroke = egui::Stroke::new(1.0, egui::Color32::RED);
+                state.view.with_cache100(|log| {
+                    if let Some(map_idx) = log.keys.iter().position(|x| x == "rpm") {
+                        point_count = log.times.len();
+                        let drawrect = ui.max_rect();
+                        let first_time = *log.times.first().unwrap();
+                        let last_time = *log.times.last().unwrap();
 
-                    let normal_rect =
-                        egui::Rect::from_min_max(Pos2 { x: 0.0, y: 0.0 }, Pos2 { x: 1.0, y: 1.0 });
-                    let tf = RectTransform::from_to(normal_rect, drawrect);
+                        let normal_rect = egui::Rect::from_x_y_ranges(0.0..=1.0, 0.0..=1.0);
+                        let tf = RectTransform::from_to(normal_rect, drawrect);
 
-                    for (idx, time) in log.times.iter().enumerate() {
-                        let v = log.data[map_idx][idx];
+                        let mut points: Vec<Pos2> = vec![];
+                        for (idx, time) in log.times.iter().enumerate() {
+                            let v = log.data[map_idx][idx];
 
-                        let normal_time =
-                            (time - first_time) as f64 / (last_time - first_time) as f64;
-                        let normal_rpm = v / 6000.0;
+                            let normal_time =
+                                (time - first_time) as f64 / (last_time - first_time) as f64;
+                            let normal_rpm = v / 6000.0;
 
-                        let point = tf.transform_pos(Pos2 {
-                            x: normal_time as f32,
-                            y: normal_rpm as f32,
-                        });
-                        painter.line_segment([point.clone(), point.clone()], stroke);
+                            let point = tf.transform_pos(Pos2 {
+                                x: normal_time as f32,
+                                y: normal_rpm as f32,
+                            });
+                            points.push(point);
+                        }
+                        ui.painter().add(epaint::Shape::line(points, stroke));
                     }
-                }
+                });
             });
         });
         egui::TopBottomPanel::bottom("Status").show(ctx, |ui| {
