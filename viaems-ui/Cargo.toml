@@ -9,11 +9,11 @@ publish = false
 
 [dependencies]
 egui = "0.31"
-eframe = "0.31"
-emath = "0.31"
+eframe = { version = "0.31", features=["wgpu", "wayland"]}
+emath = { version = "0.31" }
 epaint = "0.31"
 egui_file = "0.22"
 clap = { version = "4.4.12", features = ["derive"] }
 
 viaems = { path = "../viaems" }
-
+env_logger = "*"

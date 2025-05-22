@@ -175,6 +175,18 @@ impl LogReader {
         keys
     }
 
+    pub fn get_time_range(&self) -> Option<(SystemTime, SystemTime)> {
+        let low_query = "SELECT realtime_ns FROM points order by realtime_ns asc limit 1";
+        let low_row = self.conn.prepare(low_query).unwrap().into_iter().next()?.unwrap();
+        let low_time = low_row.read::<i64, _>(0);
+
+        let high_query = "SELECT realtime_ns FROM points order by realtime_ns desc limit 1";
+        let high_row = self.conn.prepare(high_query).unwrap().into_iter().next()?.unwrap();
+        let high_time = high_row.read::<i64, _>(0);
+
+        Some((SystemTime::UNIX_EPOCH + Duration::from_nanos(low_time as u64), SystemTime::UNIX_EPOCH + Duration::from_nanos(high_time as u64)))
+    }
+
     pub fn get_range_count(&self, start: SystemTime, stop: SystemTime) -> usize {
         let start_ns = start.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as i64;
         let stop_ns = stop.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as i64;

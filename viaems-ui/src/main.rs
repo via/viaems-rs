@@ -92,8 +92,8 @@ struct CliArgs {
 }
 
 fn main() -> Result<(), eframe::Error> {
+    env_logger::init();
     let options = eframe::NativeOptions::default();
-
     let args = CliArgs::parse();
     let mut state = Application::new();
 
@@ -104,6 +104,7 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_simple_native("Viaems UI", options, move |ctx, _frame| {
         ctx.set_visuals(egui::Visuals::light());
         ctx.set_pixels_per_point(1.5);
+        ctx.tessellation_options_mut(|o| o.feathering = false);
         let now = SystemTime::now();
         let render_time = now.duration_since(state.last_update_time).unwrap();
         state.last_update_time = now;
@@ -151,9 +152,9 @@ fn main() -> Result<(), eframe::Error> {
         let mut point_count = 0;
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style()).show(ui, |ui| {
-                let stroke = egui::Stroke::new(1.0, egui::Color32::RED);
                 state.view.with_cache100(|log| {
                     if let Some(map_idx) = log.keys.iter().position(|x| x == "rpm") {
+                        let stroke = egui::Stroke::new(1.0, egui::Color32::RED);
                         point_count = log.times.len();
                         let drawrect = ui.max_rect();
                         let first_time = *log.times.first().unwrap();
@@ -162,17 +163,44 @@ fn main() -> Result<(), eframe::Error> {
                         let normal_rect = egui::Rect::from_x_y_ranges(0.0..=1.0, 0.0..=1.0);
                         let tf = RectTransform::from_to(normal_rect, drawrect);
 
-                        let mut points: Vec<Pos2> = vec![];
+                        let mut points: Vec<Pos2> = Vec::with_capacity(log.times.len());
                         for (idx, time) in log.times.iter().enumerate() {
                             let v = log.data[map_idx][idx];
 
-                            let normal_time =
+                            let normalized_time =
                                 (time - first_time) as f64 / (last_time - first_time) as f64;
-                            let normal_rpm = v / 6000.0;
+                            let normalized_rpm = 1.0 - (v / 6000.0);
 
                             let point = tf.transform_pos(Pos2 {
-                                x: normal_time as f32,
-                                y: normal_rpm as f32,
+                                x: normalized_time as f32,
+                                y: normalized_rpm as f32,
+                            });
+                            points.push(point);
+                        }
+                        ui.painter().add(epaint::Shape::line(points, stroke));
+                    }
+
+                    if let Some(map_idx) = log.keys.iter().position(|x| x == "sensor.map") {
+                        let stroke = egui::Stroke::new(1.0, egui::Color32::GREEN);
+                        point_count = log.times.len();
+                        let drawrect = ui.max_rect();
+                        let first_time = *log.times.first().unwrap();
+                        let last_time = *log.times.last().unwrap();
+
+                        let normal_rect = egui::Rect::from_x_y_ranges(0.0..=1.0, 0.0..=1.0);
+                        let tf = RectTransform::from_to(normal_rect, drawrect);
+
+                        let mut points: Vec<Pos2> = Vec::with_capacity(log.times.len());
+                        for (idx, time) in log.times.iter().enumerate() {
+                            let v = log.data[map_idx][idx];
+
+                            let normalized_time =
+                                (time - first_time) as f64 / (last_time - first_time) as f64;
+                            let normalized_rpm = 1.0 - (v / 250.0);
+
+                            let point = tf.transform_pos(Pos2 {
+                                x: normalized_time as f32,
+                                y: normalized_rpm as f32,
                             });
                             points.push(point);
                         }

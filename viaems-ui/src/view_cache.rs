@@ -98,14 +98,11 @@ impl Backend {
             .unwrap_or(SystemTime::now() - Duration::from_secs(20));
         let stop = reader.get_latest_time().unwrap_or(SystemTime::now());
 
-        let total_count = reader.get_range_count(start, stop);
         let mut count = 0;
 
-        let mut chunk = viaems::LogChunk::new(&refkeys);
         let mut chunk10 = viaems::LogChunk::new(&refkeys);
         let mut chunk100 = viaems::LogChunk::new(&refkeys);
         let mut chunk1000 = viaems::LogChunk::new(&refkeys);
-        let before = SystemTime::now();
         reader.range_foreach(start, stop, &refkeys, |time, values| -> bool {
             //            chunk.add(time, values);
             count += 1;
@@ -124,28 +121,30 @@ impl Backend {
             }
 
             if count % 100000 == 0 {
-                let percent = 100.0 * count as f32 / total_count as f32;
+                let start_ns = start
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos() as i64;
+                let stop_ns = stop
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos() as i64;
+                let percent = 100.0 * (time - start_ns) as f64 / (stop_ns - start_ns) as f64;
                 {
                     let mut state = self.state.lock().unwrap();
                     state.cache10 = chunk10.clone();
                     state.cache100 = chunk100.clone();
                     state.cache1000 = chunk1000.clone();
-                    state.status = LoadingStatus::Loading { progress: percent };
+                    state.status = LoadingStatus::Loading {
+                        progress: percent as f32,
+                    };
                 }
             }
 
             true
         });
-        let after = SystemTime::now();
-        println!(
-            "Read {} in {} ms",
-            chunk.times.len(),
-            (after.duration_since(before).unwrap().as_millis())
-        );
-
         {
             let mut state = self.state.lock().unwrap();
-            state.cache = chunk;
             state.cache10 = chunk10;
             state.cache100 = chunk100;
             state.cache1000 = chunk1000;
@@ -200,7 +199,7 @@ impl ViewCache {
         F: FnMut(&viaems::LogChunk),
     {
         let state = self.state.lock().unwrap();
-        f(&state.cache1000);
+        f(&state.cache100);
     }
 
     pub fn set_logreader(&mut self, reader: viaems::LogReader) {
