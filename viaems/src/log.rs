@@ -203,11 +203,12 @@ impl LogReader {
             let time: i64 = row.get(0).unwrap();
             values.clear();
             for i in 1..=keys.len() {
-                let value = row
-                    .get::<_, f64>(i)
-                    .or_else(|_| row.get::<_, u32>(i).map(|x| x as f64))
-                    .unwrap();
-                values.push(value);
+                let vref = row.get_ref(i).unwrap();
+                match vref {
+                    duckdb::types::ValueRef::UInt(v) => values.push(v as f64),
+                    duckdb::types::ValueRef::Float(v) => values.push(v as f64),
+                    _ => values.push(0.0),
+                }
             }
             if !f(time, &values) {
                 break;

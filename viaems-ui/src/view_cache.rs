@@ -100,12 +100,14 @@ impl Backend {
             .get_earliest_time()
             .unwrap_or(SystemTime::now() - Duration::from_secs(20));
         let stop = reader.get_latest_time().unwrap_or(SystemTime::now());
+        println!("got times");
 
         let mut count = 0;
 
         let mut chunk10 = viaems::LogChunk::new(&refkeys);
         let mut chunk100 = viaems::LogChunk::new(&refkeys);
         let mut chunk1000 = viaems::LogChunk::new(&refkeys);
+        println!("starting foreach");
         reader.range_foreach(start, stop, &refkeys, |time, values| -> bool {
             //            chunk.add(time, values);
             count += 1;
