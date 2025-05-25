@@ -90,7 +90,10 @@ impl Backend {
     fn build_decimations(&mut self, reader: &viaems::LogReader) {
         self.state.lock().unwrap().status = LoadingStatus::Loading { progress: 0.0 };
 
+        let before = SystemTime::now();
+        println!("keys()");
         let keys = reader.keys();
+        println!("got keys()");
         let refkeys: Vec<&str> = keys.iter().map(|x| x.as_ref()).collect();
 
         let start = reader
@@ -109,7 +112,7 @@ impl Backend {
 
             // TODO real decimation algorithm
             if count % 10 == 0 {
-                chunk10.add(time, values);
+                // chunk10.add(time, values);
             }
 
             if count % 100 == 0 {
@@ -125,6 +128,7 @@ impl Backend {
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap()
                     .as_nanos() as i64;
+
                 let stop_ns = stop
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap()
@@ -150,6 +154,11 @@ impl Backend {
             state.cache1000 = chunk1000;
             state.status = LoadingStatus::Done;
         }
+        let after = SystemTime::now();
+        println!(
+            "build_decimations took {} ms",
+            after.duration_since(before).unwrap().as_millis()
+        );
     }
 }
 
