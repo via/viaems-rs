@@ -7,7 +7,7 @@ edition = "2021"
 serde_cbor = "0.11"
 serde = {version = "1.0", features = ["derive"]}
 clap = { version = "4.4", features = ["derive"] }
-duckdb = { version = "1.2", features = ["bundled"]}
+duckdb = { version = "1.2", features = ["bundled"] }
 ctrlc = "3.4"
 rusb = "0.9.3"
 rusb-async = "0.0.1-alpha"

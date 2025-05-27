@@ -92,7 +92,8 @@ impl Backend {
 
         let before = SystemTime::now();
         println!("keys()");
-        let keys = reader.keys();
+        //        let keys = reader.keys();
+        let keys = vec!["sensor.map", "sensor.ego"];
         println!("got keys()");
         let refkeys: Vec<&str> = keys.iter().map(|x| x.as_ref()).collect();
 
@@ -121,7 +122,7 @@ impl Backend {
                 chunk100.add(time, values);
             }
 
-            if count % 1000 == 0 {
+            if count % 10000 == 0 {
                 chunk1000.add(time, values);
             }
 
@@ -210,7 +211,7 @@ impl ViewCache {
         F: FnMut(&viaems::LogChunk),
     {
         let state = self.state.lock().unwrap();
-        f(&state.cache100);
+        f(&state.cache1000);
     }
 
     pub fn set_logreader(&mut self, reader: viaems::LogReader) {

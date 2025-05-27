@@ -153,7 +153,7 @@ fn main() -> Result<(), eframe::Error> {
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style()).show(ui, |ui| {
                 state.view.with_cache100(|log| {
-                    if let Some(map_idx) = log.keys.iter().position(|x| x == "rpm") {
+                    if let Some(map_idx) = log.keys.iter().position(|x| x == "sensor.ego") {
                         let stroke = egui::Stroke::new(1.0, egui::Color32::RED);
                         point_count = log.times.len();
                         let drawrect = ui.max_rect();
@@ -169,7 +169,7 @@ fn main() -> Result<(), eframe::Error> {
 
                             let normalized_time =
                                 (time - first_time) as f64 / (last_time - first_time) as f64;
-                            let normalized_rpm = 1.0 - (v / 6000.0);
+                            let normalized_rpm = 1.0 - (v / 1.5);
 
                             let point = tf.transform_pos(Pos2 {
                                 x: normalized_time as f32,

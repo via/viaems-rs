@@ -1,4 +1,6 @@
 use duckdb;
+use duckdb::arrow::array::{AsArray, PrimitiveArray};
+use duckdb::arrow::datatypes;
 use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread;
@@ -27,89 +29,106 @@ impl Drop for LogFeedWriter {
     }
 }
 
-//impl LogFeedWriter {
-//    fn ensure_columns(keys: &Vec<String>, conn: &duckdb::Connection) {
-//      let mut current_keys : Vec<String> = vec![];
-//      for row in conn.prepare("PRAGMA TABLE_INFO(points);").unwrap()
-//          .into_iter().map(|r| r.unwrap()) {
-//              current_keys.push(row.read::<&str, _>("name").to_string());
-//      }
-//
-//      if current_keys.len() == 0 {
-//        // Create table
-//          conn.execute("CREATE TABLE points (realtime_ns BIGINT);").unwrap();
-//      }
-//
-//      for new_key in keys {
-//        if let None = current_keys.iter().find(|&x| x == new_key) {
-//          // Not currently there, alter table to add it
-//          conn.execute(format!("ALTER TABLE points ADD COLUMN '{}' REAL;",
-//          new_key)).unwrap();
-//        }
-//      }
-//    }
-//
-//    pub fn new(filename: &str, keys: Vec<String>) -> LogFeedWriter {
-//        let (tx, rx) = mpsc::channel::<LogMessage>();
-//
-//        let conn = sqlite::open(filename).unwrap();
-//        conn.execute("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; ").unwrap();
-//        LogFeedWriter::ensure_columns(&keys, &conn);
-//
-//        let thr = thread::Builder::new().name("sqlite-feed-writer".to_string()).spawn(move || {
-//
-//            let insert_cols = keys
-//                .iter()
-//                .map(|_| "?")
-//                .collect::<Vec<&str>>()
-//                .join(", ");
-//            let insert_names = keys
-//                .iter()
-//                .map(|x| format!("'{x}'"))
-//                .collect::<Vec<String>>()
-//                .join(", ");
-//
-//            let mut stmt = conn.prepare(format!("insert into points (realtime_ns, {insert_names}) values (?, {insert_cols})")).unwrap();
-//
-//            let mut remaining = 0;
-//            while let Ok(val) = rx.recv() {
-//                match val {
-//                    LogMessage::FeedPoint{time, values} => {
-//                        if remaining == 0 {
-//                            conn.execute("BEGIN;").unwrap();
-//                            remaining = 5000;
-//                        }
-//                        LogFeedWriter::write(&mut stmt, time, values);
-//                        remaining -= 1;
-//                        if remaining == 0 {
-//                            conn.execute("COMMIT;").unwrap();
-//                        }
-//                    },
-//                    LogMessage::Terminate => break,
-//                }
-//            }
-//            conn.execute("COMMIT;").unwrap();
-//        }).unwrap();
-//        LogFeedWriter{ tx, handle: Some(thr) }
-//    }
-//
-//    pub fn add(&self, time: SystemTime, values: Vec<interface::FeedValue>) {
-//      self.tx.send(LogMessage::FeedPoint{time, values}).unwrap();
-//    }
-//
-//    fn write(stmt: &mut sqlite::Statement, time: SystemTime, vals: Vec<interface::FeedValue>) {
-//        let epoch_time : i64 = time.duration_since(SystemTime::UNIX_EPOCH).unwrap()
-//            .as_nanos().try_into().unwrap();
-//        stmt.reset().unwrap();
-//        stmt.bind((1, epoch_time)).unwrap();
-//        for (i, v) in vals.iter().enumerate() {
-//            match v { interface::FeedValue::Int(x) => stmt.bind((i + 2, *x as i64)),
-//                      interface::FeedValue::Float(x) => stmt.bind((i + 2, *x as f64)),
-//                      }.unwrap();
-//        }
-//        stmt.next().unwrap();
-//    }
-//}
+impl LogFeedWriter {
+    fn ensure_columns(keys: &Vec<String>, conn: &duckdb::Connection) {
+        let mut current_keys: Vec<String> = vec![];
+        conn.prepare("PRAGMA TABLE_INFO(points);")
+            .unwrap()
+            .query([])
+            .unwrap()
+            .map(|r| {
+                current_keys.push(r.get::<&str, _>("name").to_string());
+            });
+        }
+
+        if current_keys.len() == 0 {
+            // Create table
+            conn.execute("CREATE TABLE points (realtime_ns BIGINT);", [])
+                .unwrap();
+        }
+
+        for new_key in keys {
+            if let None = current_keys.iter().find(|&x| x == new_key) {
+                // Not currently there, alter table to add it
+                conn.execute(format!("ALTER TABLE points ADD COLUMN '{}' REAL;", new_key))
+                    .unwrap();
+            }
+        }
+    }
+
+    pub fn new(filename: &str, keys: Vec<String>) -> LogFeedWriter {
+        let (tx, rx) = mpsc::channel::<LogMessage>();
+
+        let conn = sqlite::open(filename).unwrap();
+        conn.execute("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; ")
+            .unwrap();
+        LogFeedWriter::ensure_columns(&keys, &conn);
+
+        let thr = thread::Builder::new().name("sqlite-feed-writer".to_string()).spawn(move || {
+
+            let insert_cols = keys
+                .iter()
+                .map(|_| "?")
+                .collect::<Vec<&str>>()
+                .join(", ");
+            let insert_names = keys
+                .iter()
+                .map(|x| format!("'{x}'"))
+                .collect::<Vec<String>>()
+                .join(", ");
+
+            let mut stmt = conn.prepare(format!("insert into points (realtime_ns, {insert_names}) values (?, {insert_cols})")).unwrap();
+
+            let mut remaining = 0;
+            while let Ok(val) = rx.recv() {
+                match val {
+                    LogMessage::FeedPoint{time, values} => {
+                        if remaining == 0 {
+                            conn.execute("BEGIN;").unwrap();
+                            remaining = 5000;
+                        }
+                        LogFeedWriter::write(&mut stmt, time, values);
+                        remaining -= 1;
+                        if remaining == 0 {
+                            conn.execute("COMMIT;").unwrap();
+                        }
+                    },
+                    LogMessage::Terminate => break,
+                }
+            }
+            conn.execute("COMMIT;").unwrap();
+        }).unwrap();
+        LogFeedWriter {
+            tx,
+            handle: Some(thr),
+        }
+    }
+
+    pub fn add(&self, time: SystemTime, values: Vec<interface::FeedValue>) {
+        self.tx
+            .send(LogMessage::FeedPoint { time, values })
+            .unwrap();
+    }
+
+    fn write(stmt: &mut sqlite::Statement, time: SystemTime, vals: Vec<interface::FeedValue>) {
+        let epoch_time: i64 = time
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+            .try_into()
+            .unwrap();
+        stmt.reset().unwrap();
+        stmt.bind((1, epoch_time)).unwrap();
+        for (i, v) in vals.iter().enumerate() {
+            match v {
+                interface::FeedValue::Int(x) => stmt.bind((i + 2, *x as i64)),
+                interface::FeedValue::Float(x) => stmt.bind((i + 2, *x as f64)),
+            }
+            .unwrap();
+        }
+        stmt.next().unwrap();
+    }
+}
 
 pub struct LogReader {
     conn: duckdb::Connection,
@@ -151,7 +170,17 @@ impl LogChunk {
 
 impl LogReader {
     pub fn new(filename: &str) -> LogReader {
-        let conn = duckdb::Connection::open(filename).unwrap();
+        let conf = duckdb::Config::default()
+            .enable_autoload_extension(false)
+            .unwrap()
+            .access_mode(duckdb::AccessMode::ReadOnly)
+            .unwrap();
+        let conn = duckdb::Connection::open_with_flags(filename, conf).unwrap();
+        conn.execute("SET autoinstall_known_extensions = false;", [])
+            .unwrap();
+        conn.execute("SET autoload_known_extensions = false;", [])
+            .unwrap();
+        conn.execute("SET lock_configuration = true;", []).unwrap();
         LogReader {
             conn,
             filename: filename.to_owned(),
@@ -175,7 +204,7 @@ impl LogReader {
 
     pub fn range_foreach<F>(&self, start: SystemTime, stop: SystemTime, keys: &[&str], mut f: F)
     where
-        F: FnMut(i64, &Vec<f64>) -> bool,
+        F: FnMut(i64, &[f64]) -> bool,
     {
         let start_ns = start
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -194,25 +223,31 @@ impl LogReader {
 
         let mut query = "SELECT realtime_ns, ".to_owned();
         query += &key_cols;
-        query += " FROM points where realtime_ns > ? and realtime_ns < ? ORDER BY realtime_ns";
+        query += &format!(
+            " FROM points where realtime_ns > {} and realtime_ns < {} ORDER BY realtime_ns",
+            start_ns, stop_ns
+        );
 
         let mut stmt = self.conn.prepare(&query).unwrap();
-        let mut results = stmt.query([start_ns, stop_ns]).unwrap();
-        let mut values = vec![];
-        while let Some(row) = results.next().unwrap() {
-            let time: i64 = row.get(0).unwrap();
-            values.clear();
-            for i in 1..=keys.len() {
-                let vref = row.get_ref(i).unwrap();
-                match vref {
-                    duckdb::types::ValueRef::UInt(v) => values.push(v as f64),
-                    duckdb::types::ValueRef::Float(v) => values.push(v as f64),
-                    _ => values.push(0.0),
+        let batch_iterator = stmt.query_arrow([]).unwrap();
+        let mut values: Vec<f64> = vec![];
+
+        for batch in batch_iterator {
+            let cols = batch.columns();
+            let times = cols[0].as_primitive::<datatypes::Int64Type>();
+            let rest: Vec<&PrimitiveArray<datatypes::Float32Type>> = cols[1..]
+                .iter()
+                .map(|s| s.as_primitive::<datatypes::Float32Type>())
+                .collect();
+            for idx in 0..batch.num_rows() {
+                values.clear();
+                for col in &rest {
+                    values.push(col.value(idx) as f64)
                 }
+                if !f(times.value(idx), values.as_slice()) {
+                    break;
+                };
             }
-            if !f(time, &values) {
-                break;
-            };
         }
     }
 
