@@ -85,40 +85,30 @@ impl LogFeedWriter {
 
         LogFeedWriter::ensure_columns(&keys, &values, &conn);
 
-        let thr = thread::Builder::new().name("sqlite-feed-writer".to_string()).spawn(move || {
+        let thr = thread::Builder::new()
+            .name("sqlite-feed-writer".to_string())
+            .spawn(move || {
+                let mut appender = conn.appender("points").unwrap();
+                let mut count = 0;
 
-            let insert_cols = keys
-                .iter()
-                .map(|_| "?")
-                .collect::<Vec<&str>>()
-                .join(", ");
-            let insert_names = keys
-                .iter()
-                .map(|x| format!("\"{x}\""))
-                .collect::<Vec<String>>()
-                .join(", ");
-
-            let mut stmt = conn.prepare(&format!("insert into points (realtime_ns, {insert_names}) values (?, {insert_cols})")).unwrap();
-
-            let mut remaining = 0;
-            while let Ok(val) = rx.recv() {
-                match val {
-                    LogMessage::FeedPoint{time, values} => {
-                        if remaining == 0 {
-                            conn.execute("BEGIN TRANSACTION;", []).unwrap();
-                            remaining = 5000;
+                while let Ok(val) = rx.recv() {
+                    match val {
+                        LogMessage::FeedPoint { time, values } => {
+                            LogFeedWriter::write(&mut appender, time, values);
+                            count += 1;
+                            if count > 10000 {
+                                appender.flush().unwrap();
+                                count = 0;
+                            }
                         }
-                        LogFeedWriter::write(&mut stmt, time, values);
-                        remaining -= 1;
-                        if remaining == 0 {
-                            conn.execute("COMMIT;", []).unwrap();
+                        LogMessage::Terminate => {
+                            appender.flush().unwrap();
+                            break;
                         }
-                    },
-                    LogMessage::Terminate => break,
+                    }
                 }
-            }
-            conn.execute("COMMIT;", []).unwrap();
-        }).unwrap();
+            })
+            .unwrap();
         Ok(LogFeedWriter {
             tx,
             handle: Some(thr),
@@ -131,7 +121,7 @@ impl LogFeedWriter {
             .unwrap();
     }
 
-    fn write(stmt: &mut duckdb::Statement, time: SystemTime, vals: Vec<interface::FeedValue>) {
+    fn write(appender: &mut duckdb::Appender, time: SystemTime, vals: Vec<interface::FeedValue>) {
         let epoch_time: i64 = time
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
@@ -145,7 +135,9 @@ impl LogFeedWriter {
             interface::FeedValue::Float(x) => params_list.push(duckdb::types::Value::Float(*x)),
         });
 
-        stmt.execute(duckdb::params_from_iter(params_list)).unwrap();
+        appender
+            .append_row(duckdb::appender_params_from_iter(params_list))
+            .unwrap();
     }
 }
 
