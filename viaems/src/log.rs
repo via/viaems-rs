@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, SystemTime};
 
-use crate::interface;
+use crate::interface::{self, FeedValue};
 
 enum LogMessage {
     FeedPoint {
@@ -30,16 +30,23 @@ impl Drop for LogFeedWriter {
 }
 
 impl LogFeedWriter {
-    fn ensure_columns(keys: &Vec<String>, conn: &duckdb::Connection) {
-        let mut current_keys: Vec<String> = vec![];
-        conn.prepare("PRAGMA TABLE_INFO(points);")
-            .unwrap()
-            .query([])
-            .unwrap()
-            .map(|r| {
-                current_keys.push(r.get::<&str, _>("name").to_string());
-            });
-        }
+    fn ensure_columns(
+        keys: &Vec<String>,
+        values: &Vec<interface::FeedValue>,
+        conn: &duckdb::Connection,
+    ) {
+        let current_keys: Vec<String> = conn
+            .prepare("PRAGMA TABLE_INFO(points);")
+            .ok()
+            .and_then(|mut s| {
+                Some(
+                    s.query_map([], |r| Ok(r.get::<_, String>("name").unwrap()))
+                        .unwrap()
+                        .map(|x| x.unwrap())
+                        .collect(),
+                )
+            })
+            .unwrap_or(vec![]);
 
         if current_keys.len() == 0 {
             // Create table
@@ -47,22 +54,36 @@ impl LogFeedWriter {
                 .unwrap();
         }
 
-        for new_key in keys {
+        for (new_key, val) in std::iter::zip(keys, values) {
             if let None = current_keys.iter().find(|&x| x == new_key) {
                 // Not currently there, alter table to add it
-                conn.execute(format!("ALTER TABLE points ADD COLUMN '{}' REAL;", new_key))
-                    .unwrap();
+                let col_type = if let interface::FeedValue::Int(_) = val {
+                    "UINTEGER"
+                } else {
+                    "FLOAT"
+                };
+                conn.execute(
+                    &format!(
+                        "ALTER TABLE points ADD COLUMN \"{}\" {};",
+                        new_key, col_type
+                    ),
+                    [],
+                )
+                .unwrap();
             }
         }
     }
 
-    pub fn new(filename: &str, keys: Vec<String>) -> LogFeedWriter {
+    pub fn new(
+        filename: &str,
+        keys: Vec<String>,
+        values: Vec<interface::FeedValue>,
+    ) -> Result<LogFeedWriter, duckdb::Error> {
         let (tx, rx) = mpsc::channel::<LogMessage>();
 
-        let conn = sqlite::open(filename).unwrap();
-        conn.execute("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; ")
-            .unwrap();
-        LogFeedWriter::ensure_columns(&keys, &conn);
+        let conn = duckdb::Connection::open(filename)?;
+
+        LogFeedWriter::ensure_columns(&keys, &values, &conn);
 
         let thr = thread::Builder::new().name("sqlite-feed-writer".to_string()).spawn(move || {
 
@@ -73,35 +94,35 @@ impl LogFeedWriter {
                 .join(", ");
             let insert_names = keys
                 .iter()
-                .map(|x| format!("'{x}'"))
+                .map(|x| format!("\"{x}\""))
                 .collect::<Vec<String>>()
                 .join(", ");
 
-            let mut stmt = conn.prepare(format!("insert into points (realtime_ns, {insert_names}) values (?, {insert_cols})")).unwrap();
+            let mut stmt = conn.prepare(&format!("insert into points (realtime_ns, {insert_names}) values (?, {insert_cols})")).unwrap();
 
             let mut remaining = 0;
             while let Ok(val) = rx.recv() {
                 match val {
                     LogMessage::FeedPoint{time, values} => {
                         if remaining == 0 {
-                            conn.execute("BEGIN;").unwrap();
+                            conn.execute("BEGIN TRANSACTION;", []).unwrap();
                             remaining = 5000;
                         }
                         LogFeedWriter::write(&mut stmt, time, values);
                         remaining -= 1;
                         if remaining == 0 {
-                            conn.execute("COMMIT;").unwrap();
+                            conn.execute("COMMIT;", []).unwrap();
                         }
                     },
                     LogMessage::Terminate => break,
                 }
             }
-            conn.execute("COMMIT;").unwrap();
+            conn.execute("COMMIT;", []).unwrap();
         }).unwrap();
-        LogFeedWriter {
+        Ok(LogFeedWriter {
             tx,
             handle: Some(thr),
-        }
+        })
     }
 
     pub fn add(&self, time: SystemTime, values: Vec<interface::FeedValue>) {
@@ -110,23 +131,21 @@ impl LogFeedWriter {
             .unwrap();
     }
 
-    fn write(stmt: &mut sqlite::Statement, time: SystemTime, vals: Vec<interface::FeedValue>) {
+    fn write(stmt: &mut duckdb::Statement, time: SystemTime, vals: Vec<interface::FeedValue>) {
         let epoch_time: i64 = time
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_nanos()
             .try_into()
             .unwrap();
-        stmt.reset().unwrap();
-        stmt.bind((1, epoch_time)).unwrap();
-        for (i, v) in vals.iter().enumerate() {
-            match v {
-                interface::FeedValue::Int(x) => stmt.bind((i + 2, *x as i64)),
-                interface::FeedValue::Float(x) => stmt.bind((i + 2, *x as f64)),
-            }
-            .unwrap();
-        }
-        stmt.next().unwrap();
+
+        let mut params_list = vec![duckdb::types::Value::BigInt(epoch_time)];
+        vals.iter().for_each(|v| match v {
+            interface::FeedValue::Int(x) => params_list.push(duckdb::types::Value::UInt(*x)),
+            interface::FeedValue::Float(x) => params_list.push(duckdb::types::Value::Float(*x)),
+        });
+
+        stmt.execute(duckdb::params_from_iter(params_list)).unwrap();
     }
 }
 
