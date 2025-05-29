@@ -71,19 +71,16 @@ fn main() {
 fn read(filename: &str) {
     let reader = viaems::LogReader::new(filename);
     let mut count = 0;
-    //  reader.get_range_row(
-    //      SystemTime::UNIX_EPOCH,
-    //      SystemTime::now(),
-    //      &["rpm", "sensor.map"],
-    //      |_| {
-    //          count += 1;
-    //      });
-    let chunk = reader.get_range(
-        SystemTime::UNIX_EPOCH,
-        SystemTime::now(),
-        &["rpm", "sensor.map"],
-    );
-    count = chunk.times.len();
+    reader
+        .query_arrow(
+            SystemTime::UNIX_EPOCH,
+            SystemTime::now(),
+            &["rpm", "sensor.map", "t0_count", "t1_count"],
+            |batch| {
+                count += 1;
+            },
+        )
+        .unwrap();
     println!("Read {} rows", count);
 }
 

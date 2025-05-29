@@ -3,7 +3,6 @@ pub mod interface;
 mod log;
 pub mod log_types;
 
-pub use log::LogChunk;
 pub use log::LogFeedWriter;
 pub use log::LogReader;
 

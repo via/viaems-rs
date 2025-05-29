@@ -1,6 +1,6 @@
 use duckdb;
-use duckdb::arrow::array::{AsArray, PrimitiveArray};
-use duckdb::arrow::datatypes;
+use duckdb::arrow::array::{AsArray, PrimitiveArray, RecordBatch, StructArray};
+use duckdb::arrow::datatypes::{self, Schema, SchemaBuilder, SchemaRef};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, SystemTime};
@@ -10,6 +10,7 @@ use crate::interface::{self, FeedValue};
 #[derive(Debug)]
 pub enum Error {
     DuckDBError(duckdb::Error, Option<String>),
+    ArrowError(duckdb::arrow::error::ArrowError),
     FeedKeysMismatch(String),
 }
 
@@ -19,6 +20,7 @@ impl std::fmt::Display for Error {
             Error::DuckDBError(dbe, Some(x)) => write!(f, "duckdb: {} (){})", x, dbe),
             Error::DuckDBError(dbe, None) => write!(f, "duckdb: {}", dbe),
             Error::FeedKeysMismatch(x) => write!(f, "log columns mismatch: {}", x),
+            Error::ArrowError(x) => write!(f, "arrow: {}", x),
         }
     }
 }
@@ -26,6 +28,12 @@ impl std::fmt::Display for Error {
 impl From<duckdb::Error> for Error {
     fn from(value: duckdb::Error) -> Self {
         Error::DuckDBError(value, None)
+    }
+}
+
+impl From<duckdb::arrow::error::ArrowError> for Error {
+    fn from(value: duckdb::arrow::error::ArrowError) -> Self {
+        Error::ArrowError(value)
     }
 }
 
@@ -116,6 +124,9 @@ impl LogFeedWriter {
         let (tx, rx) = mpsc::channel::<LogMessage>();
 
         let conn = duckdb::Connection::open(filename)?;
+        conn.execute("SET autoinstall_known_extensions = false;", [])?;
+        conn.execute("SET autoload_known_extensions = false;", [])?;
+        conn.execute("SET lock_configuration = true;", [])?;
 
         LogFeedWriter::ensure_columns(&keys, &values, &conn)?;
 
@@ -180,39 +191,6 @@ pub struct LogReader {
     filename: String,
 }
 
-#[derive(Default, Clone)]
-pub struct LogChunk {
-    pub keys: Vec<String>,
-    pub times: Vec<i64>,
-    pub data: Vec<Vec<f64>>,
-}
-
-impl LogChunk {
-    pub fn new(keys: &[&str]) -> LogChunk {
-        let mut chunk = LogChunk {
-            keys: keys.iter().map(|x| x.to_string()).collect(),
-            times: vec![],
-            data: vec![],
-        };
-        chunk.data.resize(keys.len(), vec![]);
-        chunk
-    }
-
-    pub fn add(&mut self, time: i64, values: &[f64]) {
-        self.times.push(time);
-        for (idx, v) in values.iter().enumerate() {
-            self.data[idx].push(*v)
-        }
-    }
-
-    pub fn clear(&mut self) {
-        self.times.clear();
-        for col in &mut self.data {
-            col.clear();
-        }
-    }
-}
-
 impl LogReader {
     pub fn new(filename: &str) -> LogReader {
         let conf = duckdb::Config::default()
@@ -247,9 +225,41 @@ impl LogReader {
             .collect()
     }
 
-    pub fn range_foreach<F>(&self, start: SystemTime, stop: SystemTime, keys: &[&str], mut f: F)
+    fn schema(&self) -> Result<Schema> {
+        let mut stmt = self.conn.prepare("DESCRIBE TABLE points;")?;
+        let mut builder = SchemaBuilder::new();
+        for result in stmt.query([])?.and_then(|r| -> Result<_> {
+            let col_name: String = r.get("column_name")?;
+            let col_type: String = r.get("column_type")?;
+            Ok((col_name, col_type))
+        }) {
+            let (col_name, col_type) = result?;
+            let schema_type = match col_type.as_str() {
+                "BIGINT" => datatypes::DataType::Int64,
+                "UINTEGER" => datatypes::DataType::UInt32,
+                "FLOAT" => datatypes::DataType::Float32,
+                _ => {
+                    return Err(Error::FeedKeysMismatch(format!(
+                        "unknown type in log for {}: {}",
+                        col_name, col_type
+                    )));
+                }
+            };
+            builder.push(datatypes::Field::new(col_name, schema_type, true));
+        }
+
+        Ok(builder.finish())
+    }
+
+    pub fn query_arrow<F>(
+        &self,
+        start: SystemTime,
+        stop: SystemTime,
+        keys: &[&str],
+        mut f: F,
+    ) -> Result<()>
     where
-        F: FnMut(i64, &[f64]) -> bool,
+        F: FnMut(&RecordBatch),
     {
         let start_ns = start
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -273,37 +283,24 @@ impl LogReader {
             start_ns, stop_ns
         );
 
-        let mut stmt = self.conn.prepare(&query).unwrap();
-        let batch_iterator = stmt.query_arrow([]).unwrap();
-        let mut values: Vec<f64> = vec![];
-
-        for batch in batch_iterator {
-            let cols = batch.columns();
-            let times = cols[0].as_primitive::<datatypes::Int64Type>();
-            let rest: Vec<&PrimitiveArray<datatypes::Float32Type>> = cols[1..]
-                .iter()
-                .map(|s| s.as_primitive::<datatypes::Float32Type>())
-                .collect();
-            for idx in 0..batch.num_rows() {
-                values.clear();
-                for col in &rest {
-                    values.push(col.value(idx) as f64)
-                }
-                if !f(times.value(idx), values.as_slice()) {
-                    break;
-                };
+        let full_schema = self.schema()?;
+        let mut idxs = vec![0 as usize]; // always include realtime_ns
+        for k in keys {
+            if let Some(i) = full_schema.fields.iter().position(|f| f.name() == k) {
+                idxs.push(i);
+            } else {
+                return Err(Error::FeedKeysMismatch("key not found".to_owned()));
             }
         }
-    }
+        let projected_schema = SchemaRef::new(full_schema.project(&idxs)?);
+        let mut stmt = self.conn.prepare(&query)?;
+        println!("query: {}", query);
 
-    pub fn get_range(&self, start: SystemTime, stop: SystemTime, keys: &[&str]) -> LogChunk {
-        let mut chunk = LogChunk::new(keys);
-        self.range_foreach(start, stop, keys, |time, values| {
-            chunk.add(time, values);
-            true
-        });
-
-        chunk
+        let mut stream = stmt.stream_arrow([], projected_schema)?;
+        while let Some(batch) = stream.next() {
+            f(&batch);
+        }
+        Ok(())
     }
 
     // TODO Learn out how to use ? shorthand to get rid of the unwraps
