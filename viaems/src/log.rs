@@ -1,12 +1,35 @@
 use duckdb;
 use duckdb::arrow::array::{AsArray, PrimitiveArray};
 use duckdb::arrow::datatypes;
-use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, SystemTime};
 
 use crate::interface::{self, FeedValue};
+
+#[derive(Debug)]
+pub enum Error {
+    DuckDBError(duckdb::Error, Option<String>),
+    FeedKeysMismatch(String),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::DuckDBError(dbe, Some(x)) => write!(f, "duckdb: {} (){})", x, dbe),
+            Error::DuckDBError(dbe, None) => write!(f, "duckdb: {}", dbe),
+            Error::FeedKeysMismatch(x) => write!(f, "log columns mismatch: {}", x),
+        }
+    }
+}
+
+impl From<duckdb::Error> for Error {
+    fn from(value: duckdb::Error) -> Self {
+        Error::DuckDBError(value, None)
+    }
+}
+
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 enum LogMessage {
     FeedPoint {
@@ -34,56 +57,67 @@ impl LogFeedWriter {
         keys: &Vec<String>,
         values: &Vec<interface::FeedValue>,
         conn: &duckdb::Connection,
-    ) {
-        let current_keys: Vec<String> = conn
-            .prepare("PRAGMA TABLE_INFO(points);")
-            .ok()
-            .and_then(|mut s| {
-                Some(
-                    s.query_map([], |r| Ok(r.get::<_, String>("name").unwrap()))
-                        .unwrap()
-                        .map(|x| x.unwrap())
-                        .collect(),
-                )
-            })
-            .unwrap_or(vec![]);
+    ) -> Result<()> {
+        let mut columns = vec![];
+        if let Ok(stmt) = &mut conn.prepare("DESCRIBE TABLE points;") {
+            for result in stmt.query([])?.and_then(|r| -> Result<_> {
+                let col_name: String = r.get("column_name")?;
+                let col_type: String = r.get("column_type")?;
+                Ok((col_name, col_type))
+            }) {
+                columns.push(result?);
+            }
 
-        if current_keys.len() == 0 {
-            // Create table
-            conn.execute("CREATE TABLE points (realtime_ns BIGINT);", [])
-                .unwrap();
-        }
+            if columns[0].0 != "realtime_ns" && columns[0].1 != "BIGINT" {
+                return Err(Error::FeedKeysMismatch(
+                    "realtime_ns is not BIGINT".to_owned(),
+                ));
+            }
+            columns.remove(0); // Get rid of time column for comparison
 
-        for (new_key, val) in std::iter::zip(keys, values) {
-            if let None = current_keys.iter().find(|&x| x == new_key) {
-                // Not currently there, alter table to add it
+            for (idx, (k, v)) in std::iter::zip(keys, values).enumerate() {
+                let kt = match v {
+                    interface::FeedValue::Int(_) => "UINTEGER",
+                    interface::FeedValue::Float(_) => "FLOAT",
+                };
+                if columns[idx].0 != *k || columns[idx].1 != kt {
+                    return Err(Error::FeedKeysMismatch(columns[idx].0.clone()));
+                }
+                if columns.len() != keys.len() {
+                    return Err(Error::FeedKeysMismatch(
+                        "different number of columns".to_owned(),
+                    ));
+                }
+            }
+        } else {
+            // Table did not exist or new database, go ahead and create points
+            let mut query = "CREATE TABLE points (realtime_ns BIGINT, ".to_owned();
+            for (new_key, val) in std::iter::zip(keys, values) {
                 let col_type = if let interface::FeedValue::Int(_) = val {
                     "UINTEGER"
                 } else {
                     "FLOAT"
                 };
-                conn.execute(
-                    &format!(
-                        "ALTER TABLE points ADD COLUMN \"{}\" {};",
-                        new_key, col_type
-                    ),
-                    [],
-                )
-                .unwrap();
+                query += &format!("\"{}\" {}, ", new_key, col_type);
             }
+
+            query += ");";
+            conn.execute(&query, [])?;
         }
+
+        Ok(())
     }
 
     pub fn new(
         filename: &str,
         keys: Vec<String>,
         values: Vec<interface::FeedValue>,
-    ) -> Result<LogFeedWriter, duckdb::Error> {
+    ) -> Result<LogFeedWriter> {
         let (tx, rx) = mpsc::channel::<LogMessage>();
 
         let conn = duckdb::Connection::open(filename)?;
 
-        LogFeedWriter::ensure_columns(&keys, &values, &conn);
+        LogFeedWriter::ensure_columns(&keys, &values, &conn)?;
 
         let thr = thread::Builder::new()
             .name("sqlite-feed-writer".to_string())
@@ -204,9 +238,9 @@ impl LogReader {
 
     pub fn keys(&self) -> Vec<String> {
         self.conn
-            .prepare("PRAGMA TABLE_INFO(points);")
+            .prepare("DESCRIBE TABLE points;")
             .unwrap()
-            .query_map([], |row| row.get::<_, String>("name"))
+            .query_map([], |row| row.get::<_, String>("column_name"))
             .unwrap()
             .flatten()
             .skip(1)
@@ -235,7 +269,7 @@ impl LogReader {
         let mut query = "SELECT realtime_ns, ".to_owned();
         query += &key_cols;
         query += &format!(
-            " FROM points where realtime_ns > {} and realtime_ns < {} ORDER BY realtime_ns",
+            " FROM points where realtime_ns > {} and realtime_ns < {}",
             start_ns, stop_ns
         );
 
