@@ -11,6 +11,8 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
+pub use duckdb::arrow;
+
 type FeedCallback = dyn FnMut(SystemTime, &Vec<String>, &Vec<interface::FeedValue>) -> () + Send;
 type RequestCallback = dyn FnOnce(interface::ResponseValue) -> () + Send;
 

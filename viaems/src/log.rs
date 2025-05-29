@@ -194,6 +194,8 @@ pub struct LogReader {
 impl LogReader {
     pub fn new(filename: &str) -> LogReader {
         let conf = duckdb::Config::default()
+            .max_memory("2GB")
+            .unwrap()
             .enable_autoload_extension(false)
             .unwrap()
             .access_mode(duckdb::AccessMode::ReadOnly)

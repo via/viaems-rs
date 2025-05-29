@@ -3,7 +3,8 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
-use viaems::{self, LogChunk};
+use viaems;
+use viaems::arrow::array::{AsArray, Datum};
 
 #[derive(Clone)]
 pub enum LoadingStatus {
@@ -23,24 +24,27 @@ impl Default for ViewportConfig {
         ViewportConfig {
             start: SystemTime::now() - Duration::from_secs(20),
             stop: SystemTime::now(),
-            width: 0,
+            width: 1000,
         }
     }
 }
 
 #[derive(Clone)]
+pub struct ViewPixel {
+    pub exists: bool,
+    pub min: f32,
+    pub max: f32,
+}
+
+#[derive(Clone)]
 pub struct ViewData {
     pub config: ViewportConfig,
-    pub data: HashMap<String, Vec<f32>>,
+    pub data: HashMap<String, Vec<ViewPixel>>,
 }
 
 struct ViewSharedState {
     status: LoadingStatus,
-
-    cache: viaems::LogChunk,
-    cache10: viaems::LogChunk,
-    cache100: viaems::LogChunk,
-    cache1000: viaems::LogChunk,
+    data: ViewData,
 }
 
 pub struct ViewCache {
@@ -72,7 +76,7 @@ impl Backend {
                     self.clear_decimations();
                 }
                 Ok(ViewBackendCommand::Open(r)) => {
-                    self.build_decimations(&r);
+                    self.build_viewport(&r);
                     self.reader = Some(r);
                 }
             }
@@ -81,81 +85,101 @@ impl Backend {
 
     fn clear_decimations(&mut self) {
         let mut state = self.state.lock().unwrap();
-        state.cache.clear();
-        state.cache10.clear();
-        state.cache100.clear();
-        state.cache1000.clear();
+        state.data.data.clear();
     }
 
-    fn build_decimations(&mut self, reader: &viaems::LogReader) {
+    fn build_viewport(&mut self, reader: &viaems::LogReader) {
         self.state.lock().unwrap().status = LoadingStatus::Loading { progress: 0.0 };
 
         let before = SystemTime::now();
-        println!("keys()");
-        //        let keys = reader.keys();
-        let keys = vec!["sensor.map", "sensor.ego"];
-        println!("got keys()");
+        //      let keys = reader.keys();
+        let keys = vec!["rpm", "sensor.map", "sensor.ego"];
         let refkeys: Vec<&str> = keys.iter().map(|x| x.as_ref()).collect();
 
         let start = reader
             .get_earliest_time()
             .unwrap_or(SystemTime::now() - Duration::from_secs(20));
         let stop = reader.get_latest_time().unwrap_or(SystemTime::now());
+        let start_ns = start
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as i64;
+
+        let stop_ns = stop
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as i64;
         println!("got times");
 
         let mut count = 0;
+        let mut batch_count = 0;
 
-        let mut chunk10 = viaems::LogChunk::new(&refkeys);
-        let mut chunk100 = viaems::LogChunk::new(&refkeys);
-        let mut chunk1000 = viaems::LogChunk::new(&refkeys);
-        println!("starting foreach");
-        reader.range_foreach(start, stop, &refkeys, |time, values| -> bool {
-            //            chunk.add(time, values);
-            count += 1;
-
-            // TODO real decimation algorithm
-            if count % 10 == 0 {
-                // chunk10.add(time, values);
-            }
-
-            if count % 100 == 0 {
-                chunk100.add(time, values);
-            }
-
-            if count % 10000 == 0 {
-                chunk1000.add(time, values);
-            }
-
-            if count % 100000 == 0 {
-                let start_ns = start
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos() as i64;
-
-                let stop_ns = stop
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos() as i64;
-                let percent = 100.0 * (time - start_ns) as f64 / (stop_ns - start_ns) as f64;
-                {
-                    let mut state = self.state.lock().unwrap();
-                    state.cache10 = chunk10.clone();
-                    state.cache100 = chunk100.clone();
-                    state.cache1000 = chunk1000.clone();
-                    state.status = LoadingStatus::Loading {
-                        progress: percent as f32,
+        let config = self.state.lock().unwrap().data.config.clone();
+        let mut cache: HashMap<String, Vec<ViewPixel>> = HashMap::new();
+        for k in &keys {
+            cache.insert(
+                k.to_string(),
+                vec![
+                    ViewPixel {
+                        exists: false,
+                        min: f32::MAX,
+                        max: f32::MIN
                     };
-                }
-            }
+                    config.width as usize
+                ],
+            );
+        }
 
-            true
-        });
+        reader
+            .query_arrow(start, stop, &refkeys, |batch| {
+                let time_array = batch.column(0);
+                for (idx, data) in batch.columns().iter().skip(1).enumerate() {
+                    let col_name = keys[idx];
+                    let pixels = cache.get_mut(col_name).unwrap();
+
+                    for row_idx in 0..batch.num_rows() {
+                        let time = time_array
+                            .as_primitive::<viaems::arrow::datatypes::Int64Type>()
+                            .value(row_idx);
+                        let value = match data.data_type() {
+                            viaems::arrow::datatypes::DataType::UInt32 => {
+                                data.as_primitive::<viaems::arrow::datatypes::UInt32Type>()
+                                    .value(row_idx) as f32
+                            }
+                            viaems::arrow::datatypes::DataType::Float32 => {
+                                data.as_primitive::<viaems::arrow::datatypes::Float32Type>()
+                                    .value(row_idx) as f32
+                            }
+                            _ => 0.0,
+                        };
+                        let pixel_idx = (((time - start_ns) as f64 / (stop_ns - start_ns) as f64)
+                            * config.width as f64) as usize;
+
+                        if value < pixels[pixel_idx].min {
+                            pixels[pixel_idx].min = value;
+                        }
+                        if value > pixels[pixel_idx].max {
+                            pixels[pixel_idx].max = value;
+                        }
+                        pixels[pixel_idx].exists = true;
+                    }
+                }
+                count += batch.num_rows();
+                batch_count += 1;
+
+                if batch_count % 100 == 0 {
+                    {
+                        let mut state = self.state.lock().unwrap();
+                        state.status = LoadingStatus::Loading { progress: 0 as f32 };
+                        state.data.data = cache.clone();
+                    }
+                }
+            })
+            .unwrap();
         {
             let mut state = self.state.lock().unwrap();
-            state.cache10 = chunk10;
-            state.cache100 = chunk100;
-            state.cache1000 = chunk1000;
             state.status = LoadingStatus::Done;
+            state.data.data = cache;
         }
         let after = SystemTime::now();
         println!(
@@ -175,10 +199,7 @@ impl ViewCache {
 
         let shared_state = Arc::new(Mutex::new(ViewSharedState {
             status: LoadingStatus::Done,
-            cache: viaems::LogChunk::default(),
-            cache10: viaems::LogChunk::default(),
-            cache100: viaems::LogChunk::default(),
-            cache1000: viaems::LogChunk::default(),
+            data: view,
         }));
         let (cmd_chan_tx, cmd_chan_rx) = mpsc::channel::<ViewBackendCommand>();
         let backend_thread = thread::Builder::new()
@@ -206,12 +227,12 @@ impl ViewCache {
         self.state.lock().unwrap().status.clone()
     }
 
-    pub fn with_cache100<F>(&mut self, mut f: F)
+    pub fn with_viewport<F>(&mut self, mut f: F)
     where
-        F: FnMut(&viaems::LogChunk),
+        F: FnMut(&ViewData),
     {
         let state = self.state.lock().unwrap();
-        f(&state.cache1000);
+        f(&state.data);
     }
 
     pub fn set_logreader(&mut self, reader: viaems::LogReader) {

@@ -75,8 +75,9 @@ fn read(filename: &str) {
         .query_arrow(
             SystemTime::UNIX_EPOCH,
             SystemTime::now(),
-            &["rpm", "sensor.map", "t0_count", "t1_count"],
+            &["rpm", "sensor.map"],
             |batch| {
+                println!("batch with {} rows", batch.num_rows());
                 count += 1;
             },
         )

@@ -152,59 +152,52 @@ fn main() -> Result<(), eframe::Error> {
         let mut point_count = 0;
         egui::CentralPanel::default().show(ctx, |ui| {
             Frame::canvas(ui.style()).show(ui, |ui| {
-                state.view.with_cache100(|log| {
-                    if let Some(map_idx) = log.keys.iter().position(|x| x == "sensor.ego") {
-                        let stroke = egui::Stroke::new(1.0, egui::Color32::RED);
-                        point_count = log.times.len();
-                        let drawrect = ui.max_rect();
-                        let first_time = *log.times.first().unwrap();
-                        let last_time = *log.times.last().unwrap();
-
-                        let normal_rect = egui::Rect::from_x_y_ranges(0.0..=1.0, 0.0..=1.0);
-                        let tf = RectTransform::from_to(normal_rect, drawrect);
-
-                        let mut points: Vec<Pos2> = Vec::with_capacity(log.times.len());
-                        for (idx, time) in log.times.iter().enumerate() {
-                            let v = log.data[map_idx][idx];
-
-                            let normalized_time =
-                                (time - first_time) as f64 / (last_time - first_time) as f64;
-                            let normalized_rpm = 1.0 - (v / 1.5);
-
-                            let point = tf.transform_pos(Pos2 {
-                                x: normalized_time as f32,
-                                y: normalized_rpm as f32,
-                            });
-                            points.push(point);
-                        }
-                        ui.painter().add(epaint::Shape::line(points, stroke));
-                    }
-
-                    if let Some(map_idx) = log.keys.iter().position(|x| x == "sensor.map") {
+                state.view.with_viewport(|vp| {
+                    if let Some(map_vec) = vp.data.get("sensor.map") {
                         let stroke = egui::Stroke::new(1.0, egui::Color32::GREEN);
-                        point_count = log.times.len();
                         let drawrect = ui.max_rect();
-                        let first_time = *log.times.first().unwrap();
-                        let last_time = *log.times.last().unwrap();
 
                         let normal_rect = egui::Rect::from_x_y_ranges(0.0..=1.0, 0.0..=1.0);
                         let tf = RectTransform::from_to(normal_rect, drawrect);
 
-                        let mut points: Vec<Pos2> = Vec::with_capacity(log.times.len());
-                        for (idx, time) in log.times.iter().enumerate() {
-                            let v = log.data[map_idx][idx];
+                        for (idx, range) in map_vec.iter().enumerate() {
+                            if !range.exists {
+                                continue;
+                            }
+                            let normalized_x = idx as f32 / vp.config.width as f32;
+                            let normalized_min = range.min / 200.0 as f32;
+                            let normalized_max = range.max / 200.0 as f32;
+                            let min_point =
+                                tf.transform_pos(Pos2::new(normalized_x, normalized_min));
+                            let max_point =
+                                tf.transform_pos(Pos2::new(normalized_x, normalized_max));
 
-                            let normalized_time =
-                                (time - first_time) as f64 / (last_time - first_time) as f64;
-                            let normalized_rpm = 1.0 - (v / 250.0);
-
-                            let point = tf.transform_pos(Pos2 {
-                                x: normalized_time as f32,
-                                y: normalized_rpm as f32,
-                            });
-                            points.push(point);
+                            ui.painter()
+                                .add(epaint::Shape::line(vec![min_point, max_point], stroke));
                         }
-                        ui.painter().add(epaint::Shape::line(points, stroke));
+                    }
+                    if let Some(rpm_vec) = vp.data.get("rpm") {
+                        let stroke = egui::Stroke::new(1.0, egui::Color32::RED);
+                        let drawrect = ui.max_rect();
+
+                        let normal_rect = egui::Rect::from_x_y_ranges(0.0..=1.0, 0.0..=1.0);
+                        let tf = RectTransform::from_to(normal_rect, drawrect);
+
+                        for (idx, range) in rpm_vec.iter().enumerate() {
+                            if !range.exists {
+                                continue;
+                            }
+                            let normalized_x = idx as f32 / vp.config.width as f32;
+                            let normalized_min = range.min / 6000 as f32;
+                            let normalized_max = range.max / 6000 as f32;
+                            let min_point =
+                                tf.transform_pos(Pos2::new(normalized_x, normalized_min));
+                            let max_point =
+                                tf.transform_pos(Pos2::new(normalized_x, normalized_max));
+
+                            ui.painter()
+                                .add(epaint::Shape::line(vec![min_point, max_point], stroke));
+                        }
                     }
                 });
             });
