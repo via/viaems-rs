@@ -1,10 +1,12 @@
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
 use viaems;
-use viaems::arrow::array::{AsArray, Datum};
+use viaems::arrow::array::AsArray;
+use viaems::arrow::compute;
 
 #[derive(Clone)]
 pub enum LoadingStatus {
@@ -24,7 +26,7 @@ impl Default for ViewportConfig {
         ViewportConfig {
             start: SystemTime::now() - Duration::from_secs(20),
             stop: SystemTime::now(),
-            width: 1000,
+            width: 10000,
         }
     }
 }
@@ -111,6 +113,8 @@ impl Backend {
             .as_nanos() as i64;
         println!("got times");
 
+        let total_count = reader.point_count_in_range(start, stop).unwrap();
+
         let mut count = 0;
         let mut batch_count = 0;
 
@@ -132,28 +136,39 @@ impl Backend {
 
         reader
             .query_arrow(start, stop, &refkeys, |batch| {
-                let time_array = batch.column(0);
+                let times = batch
+                    .column(0)
+                    .as_primitive::<viaems::arrow::datatypes::Int64Type>();
+                let pixel_indexes_array =
+                    times.unary::<_, viaems::arrow::datatypes::Int64Type>(|time| {
+                        let pixel_idx = (((time - start_ns) as f64 / (stop_ns - start_ns) as f64)
+                            * config.width as f64) as i64;
+                        pixel_idx
+                    });
+                let pixel_indexes = pixel_indexes_array.values();
+
                 for (idx, data) in batch.columns().iter().skip(1).enumerate() {
                     let col_name = keys[idx];
                     let pixels = cache.get_mut(col_name).unwrap();
 
+                    let casted;
+                    let values = match data.data_type() {
+                        viaems::arrow::datatypes::DataType::Float32 => data
+                            .as_primitive::<viaems::arrow::datatypes::Float32Type>()
+                            .values(),
+                        viaems::arrow::datatypes::DataType::UInt32 => {
+                            casted =
+                                compute::cast(data, &viaems::arrow::datatypes::DataType::Float32)
+                                    .unwrap();
+                            casted
+                                .as_primitive::<viaems::arrow::datatypes::Float32Type>()
+                                .values()
+                        }
+                        _ => panic!("Unrecognized type in conversion"),
+                    };
                     for row_idx in 0..batch.num_rows() {
-                        let time = time_array
-                            .as_primitive::<viaems::arrow::datatypes::Int64Type>()
-                            .value(row_idx);
-                        let value = match data.data_type() {
-                            viaems::arrow::datatypes::DataType::UInt32 => {
-                                data.as_primitive::<viaems::arrow::datatypes::UInt32Type>()
-                                    .value(row_idx) as f32
-                            }
-                            viaems::arrow::datatypes::DataType::Float32 => {
-                                data.as_primitive::<viaems::arrow::datatypes::Float32Type>()
-                                    .value(row_idx) as f32
-                            }
-                            _ => 0.0,
-                        };
-                        let pixel_idx = (((time - start_ns) as f64 / (stop_ns - start_ns) as f64)
-                            * config.width as f64) as usize;
+                        let pixel_idx = pixel_indexes[row_idx] as usize;
+                        let value = values[row_idx];
 
                         if value < pixels[pixel_idx].min {
                             pixels[pixel_idx].min = value;
@@ -164,13 +179,15 @@ impl Backend {
                         pixels[pixel_idx].exists = true;
                     }
                 }
+
                 count += batch.num_rows();
                 batch_count += 1;
 
                 if batch_count % 100 == 0 {
                     {
                         let mut state = self.state.lock().unwrap();
-                        state.status = LoadingStatus::Loading { progress: 0 as f32 };
+                        let progress = count as f32 / total_count as f32 * 100.0;
+                        state.status = LoadingStatus::Loading { progress };
                         state.data.data = cache.clone();
                     }
                 }

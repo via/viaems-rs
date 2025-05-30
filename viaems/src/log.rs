@@ -297,12 +297,30 @@ impl LogReader {
         let projected_schema = SchemaRef::new(full_schema.project(&idxs)?);
         let mut stmt = self.conn.prepare(&query)?;
         println!("query: {}", query);
-
         let mut stream = stmt.stream_arrow([], projected_schema)?;
+
         while let Some(batch) = stream.next() {
             f(&batch);
         }
         Ok(())
+    }
+
+    pub fn point_count_in_range(&self, start: SystemTime, stop: SystemTime) -> Result<i64> {
+        let start_ns = start
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as i64;
+        let stop_ns = stop
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as i64;
+        let query = "SELECT count(*) from points where realtime_ns > ? and realtime_ns < ?;";
+
+        let result = self
+            .conn
+            .query_row(query, [start_ns, stop_ns], |r| r.get::<_, i64>(0))?;
+
+        Ok(result)
     }
 
     // TODO Learn out how to use ? shorthand to get rid of the unwraps
