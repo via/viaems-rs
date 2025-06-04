@@ -26,7 +26,7 @@ impl Default for ViewportConfig {
         ViewportConfig {
             start: SystemTime::now() - Duration::from_secs(20),
             stop: SystemTime::now(),
-            width: 1000,
+            width: 10000,
         }
     }
 }

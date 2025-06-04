@@ -112,8 +112,9 @@ fn main() -> Result<(), eframe::Error> {
     }
 
     eframe::run_simple_native("Viaems UI", options, move |ctx, _frame| {
-        ctx.set_visuals(egui::Visuals::light());
+        //ctx.set_visuals(egui::Visuals::light());
         ctx.set_pixels_per_point(1.5);
+
         let now = SystemTime::now();
         let render_time = now.duration_since(state.last_update_time).unwrap();
         state.last_update_time = now;
@@ -159,10 +160,6 @@ fn main() -> Result<(), eframe::Error> {
             });
         }
         let mut point_count = 0;
-        egui::CentralPanel::default().show(ctx, |ui| {
-            //            log_view::render_log_view(ui, &mut state.view);
-            state.logview.ui(ui);
-        });
         egui::TopBottomPanel::bottom("Status").show(ctx, |ui| {
             match &state.target {
                 None => ui.label("Target: Not connected"),
@@ -187,6 +184,10 @@ fn main() -> Result<(), eframe::Error> {
                     ))
                 }
             };
+        });
+        egui::CentralPanel::default().show(ctx, |ui| {
+            //            log_view::render_log_view(ui, &mut state.view);
+            state.logview.ui(ui);
         });
         ctx.request_repaint();
     })
