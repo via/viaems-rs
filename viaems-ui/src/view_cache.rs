@@ -26,7 +26,7 @@ impl Default for ViewportConfig {
         ViewportConfig {
             start: SystemTime::now() - Duration::from_secs(20),
             stop: SystemTime::now(),
-            width: 10000,
+            width: 1000,
         }
     }
 }
@@ -244,7 +244,7 @@ impl ViewCache {
         self.state.lock().unwrap().status.clone()
     }
 
-    pub fn with_viewport<F>(&mut self, mut f: F)
+    pub fn with_viewport<F>(&self, mut f: F)
     where
         F: FnMut(&ViewData),
     {

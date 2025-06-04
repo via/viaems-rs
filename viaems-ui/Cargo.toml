@@ -13,6 +13,7 @@ eframe = { version = "0.31", features=["wgpu", "wayland"]}
 emath = { version = "0.31" }
 epaint = "0.31"
 egui_file = "0.22"
+egui_tiles = "*"
 clap = { version = "4.4.12", features = ["derive"] }
 
 viaems = { path = "../viaems" }
