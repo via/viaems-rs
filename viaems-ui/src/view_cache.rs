@@ -1,64 +1,84 @@
 use std::collections::HashMap;
-use std::ops::Deref;
+use std::ops::Range;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
+use egui::TextBuffer;
 use viaems;
-use viaems::arrow::array::AsArray;
+use viaems::arrow::array::{AsArray, Datum};
 use viaems::arrow::compute;
 
 #[derive(Clone)]
 pub enum LoadingStatus {
     Done,
     Loading { progress: f32 },
+    Idle,
 }
 
+/// Stores a single data point that represents a summary of a time range
 #[derive(Clone)]
-pub struct ViewportConfig {
-    pub start: SystemTime,
-    pub stop: SystemTime,
-    pub width: u32,
+pub struct PointSummary {
+    /// Time range represented by the point
+    pub time: Range<i64>,
+
+    /// Value range represented by the point, but potentially not loaded yet
+    pub value: Range<f32>,
 }
 
-impl Default for ViewportConfig {
-    fn default() -> ViewportConfig {
-        ViewportConfig {
-            start: SystemTime::now() - Duration::from_secs(20),
-            stop: SystemTime::now(),
-            width: 10000,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct ViewPixel {
-    pub exists: bool,
-    pub min: f32,
-    pub max: f32,
-}
-
-#[derive(Clone)]
-pub struct ViewData {
-    pub config: ViewportConfig,
-    pub data: HashMap<String, Vec<ViewPixel>>,
-}
-
+/// Actual state that is shared between the frontend ViewCache and the Backend worker
 struct ViewSharedState {
     status: LoadingStatus,
-    data: ViewData,
+
+    /// After loading, contains the point count for display purposes
+    point_count: usize,
+
+    // Store un-summarized view of a single time range
+    hotcache: HashMap<String, Vec<PointSummary>>,
+
+    // Store un-summarized view of a single time range
+    new_data: HashMap<String, Vec<PointSummary>>,
+
+    // Store summarized view of entire log
+    cache100: HashMap<String, Vec<PointSummary>>,
+    cache10000: HashMap<String, Vec<PointSummary>>,
 }
 
 pub struct ViewCache {
     state: Arc<Mutex<ViewSharedState>>,
     cmd_chan: mpsc::Sender<ViewBackendCommand>,
     thread: thread::JoinHandle<()>,
+    keys: Vec<String>,
 }
 
 enum ViewBackendCommand {
     Close,
     Open(viaems::LogReader),
     Die,
+    SetKeys { keys: Vec<String> },
+    SetHotCache { start_ns: i64, stop_ns: i64 },
+}
+
+struct SummaryBuilder {
+    count: usize,
+    summary: PointSummary,
+}
+
+impl SummaryBuilder {
+    fn has_time_gap(&self, time: i64) -> bool {
+        time - self.summary.time.end > Duration::from_secs(1).as_nanos() as i64
+    }
+
+    fn add(&mut self, time: i64, value: f32) {
+        self.summary.time.end = time;
+        if value > self.summary.value.end {
+            self.summary.value.end = value;
+        }
+        if value < self.summary.value.start {
+            self.summary.value.start = value;
+        }
+        self.count += 1;
+    }
 }
 
 struct Backend {
@@ -68,88 +88,83 @@ struct Backend {
 }
 
 impl Backend {
-    fn backend_render_loop(&mut self) {
+    fn backend_command_loop(&mut self) {
         loop {
             match self.cmd_chan.recv() {
                 Err(_) => return,
                 Ok(ViewBackendCommand::Die) => return,
                 Ok(ViewBackendCommand::Close) => {
                     self.reader = None;
-                    self.clear_decimations();
+                    self.set_status(LoadingStatus::Idle);
                 }
                 Ok(ViewBackendCommand::Open(r)) => {
-                    self.build_viewport(&r);
+                    // Determine overall point count of the file
+                    self.set_status(LoadingStatus::Loading { progress: 0.0 });
+                    let earliest = SystemTime::UNIX_EPOCH;
+                    let latest = SystemTime::now();
+                    let total_count = r.point_count_in_range(earliest, latest).unwrap();
+                    self.state.lock().unwrap().point_count = total_count as usize;
+                    self.set_status(LoadingStatus::Done);
                     self.reader = Some(r);
+                }
+                Ok(ViewBackendCommand::SetHotCache { start_ns, stop_ns }) => {}
+                Ok(ViewBackendCommand::SetKeys { keys }) => {
+                    self.update_decimations(keys);
                 }
             }
         }
     }
 
-    fn clear_decimations(&mut self) {
-        let mut state = self.state.lock().unwrap();
-        state.data.data.clear();
+    fn set_status(&self, status: LoadingStatus) {
+        self.state.lock().unwrap().status = status;
     }
 
-    fn build_viewport(&mut self, reader: &viaems::LogReader) {
-        self.state.lock().unwrap().status = LoadingStatus::Loading { progress: 0.0 };
+    fn update_decimations(&mut self, new_keys: Vec<String>) {
+        self.set_status(LoadingStatus::Loading { progress: 0.0 });
 
         let before = SystemTime::now();
-        //      let keys = reader.keys();
-        let keys = vec!["rpm", "sensor.map", "sensor.ego"];
-        let refkeys: Vec<&str> = keys.iter().map(|x| x.as_ref()).collect();
+        let reader = if let Some(r) = &self.reader {
+            r
+        } else {
+            return;
+        };
 
-        let start = reader
-            .get_earliest_time()
-            .unwrap_or(SystemTime::now() - Duration::from_secs(20));
-        let stop = reader.get_latest_time().unwrap_or(SystemTime::now());
-        let start_ns = start
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as i64;
+        let start = SystemTime::UNIX_EPOCH;
+        let stop = SystemTime::now(); // TODO this should be "max" time
 
-        let stop_ns = stop
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as i64;
-        println!("got times");
+        let mut current_count = 0;
 
-        let total_count = reader.point_count_in_range(start, stop).unwrap();
+        let refkeys: Vec<&str> = new_keys.iter().map(|x| x.as_str()).collect();
 
-        let mut count = 0;
-        let mut batch_count = 0;
+        let mut current_cache100 = Vec::new();
+        let mut current_cache10000 = Vec::new();
 
-        let config = self.state.lock().unwrap().data.config.clone();
-        let mut cache: HashMap<String, Vec<ViewPixel>> = HashMap::new();
-        for k in &keys {
-            cache.insert(
-                k.to_string(),
-                vec![
-                    ViewPixel {
-                        exists: false,
-                        min: f32::MAX,
-                        max: f32::MIN
-                    };
-                    config.width as usize
-                ],
-            );
-        }
+        current_cache100.resize_with(refkeys.len(), || SummaryBuilder {
+            count: 0,
+            summary: PointSummary {
+                time: 0..0,
+                value: 0.0..0.0,
+            },
+        });
+
+        current_cache10000.resize_with(refkeys.len(), || SummaryBuilder {
+            count: 0,
+            summary: PointSummary {
+                time: 0..0,
+                value: 0.0..0.0,
+            },
+        });
 
         reader
             .query_arrow(start, stop, &refkeys, |batch| {
                 let times = batch
                     .column(0)
-                    .as_primitive::<viaems::arrow::datatypes::Int64Type>();
-                let pixel_indexes_array =
-                    times.unary::<_, viaems::arrow::datatypes::Int64Type>(|time| {
-                        let pixel_idx = (((time - start_ns) as f64 / (stop_ns - start_ns) as f64)
-                            * config.width as f64) as i64;
-                        pixel_idx
-                    });
-                let pixel_indexes = pixel_indexes_array.values();
+                    .as_primitive::<viaems::arrow::datatypes::Int64Type>()
+                    .values();
 
+                current_count += batch.num_rows();
                 for (idx, data) in batch.columns().iter().skip(1).enumerate() {
-                    let col_name = keys[idx];
-                    let pixels = cache.get_mut(col_name).unwrap();
+                    let col_name = refkeys[idx];
 
                     let casted;
                     let values = match data.data_type() {
@@ -166,38 +181,60 @@ impl Backend {
                         }
                         _ => panic!("Unrecognized type in conversion"),
                     };
+
+                    let pg100 = &mut current_cache100[idx];
+                    let pg10000 = &mut current_cache10000[idx];
+
                     for row_idx in 0..batch.num_rows() {
-                        let pixel_idx = pixel_indexes[row_idx] as usize;
                         let value = values[row_idx];
 
-                        if value < pixels[pixel_idx].min {
-                            pixels[pixel_idx].min = value;
+                        // If its the first one, reset everything
+                        if pg100.count == 0 {
+                            pg100.summary.time = times[row_idx]..times[row_idx];
+                            pg100.summary.value = value..value;
                         }
-                        if value > pixels[pixel_idx].max {
-                            pixels[pixel_idx].max = value;
+
+                        if pg10000.count == 0 {
+                            pg10000.summary.time = times[row_idx]..times[row_idx];
+                            pg10000.summary.value = value..value;
                         }
-                        pixels[pixel_idx].exists = true;
+
+                        pg100.add(times[row_idx], value);
+                        pg10000.add(times[row_idx], value);
+
+                        if pg100.count == 100 {
+                            // Complete the group, add to the result
+                            pg100.count = 0;
+                            let mut locked = self.state.lock().unwrap();
+                            locked
+                                .cache100
+                                .entry(col_name.to_owned())
+                                .or_insert(vec![])
+                                .push(pg100.summary.clone());
+                        }
+
+                        if pg10000.count == 10000 {
+                            // Complete the group, add to the result
+                            pg10000.count = 0;
+                            let mut locked = self.state.lock().unwrap();
+                            locked
+                                .cache10000
+                                .entry(col_name.to_owned())
+                                .or_insert(vec![])
+                                .push(pg10000.summary.clone());
+                        }
                     }
                 }
 
-                count += batch.num_rows();
-                batch_count += 1;
-
-                if batch_count % 100 == 0 {
-                    {
-                        let mut state = self.state.lock().unwrap();
-                        let progress = count as f32 / total_count as f32 * 100.0;
-                        state.status = LoadingStatus::Loading { progress };
-                        state.data.data = cache.clone();
-                    }
+                {
+                    let mut locked = self.state.lock().unwrap();
+                    let progress = current_count as f32 / locked.point_count as f32 * 100.0;
+                    locked.status = LoadingStatus::Loading { progress };
                 }
             })
             .unwrap();
-        {
-            let mut state = self.state.lock().unwrap();
-            state.status = LoadingStatus::Done;
-            state.data.data = cache;
-        }
+
+        self.set_status(LoadingStatus::Done);
         let after = SystemTime::now();
         println!(
             "build_decimations took {} ms",
@@ -209,15 +246,16 @@ impl Backend {
 impl ViewCache {
     pub fn new() -> ViewCache {
         // Default to a 20 second empty view
-        let view = ViewData {
-            config: ViewportConfig::default(),
-            data: HashMap::default(),
-        };
 
         let shared_state = Arc::new(Mutex::new(ViewSharedState {
             status: LoadingStatus::Done,
-            data: view,
+            point_count: 0,
+            hotcache: HashMap::default(),
+            new_data: HashMap::default(),
+            cache100: HashMap::default(),
+            cache10000: HashMap::default(),
         }));
+
         let (cmd_chan_tx, cmd_chan_rx) = mpsc::channel::<ViewBackendCommand>();
         let backend_thread = thread::Builder::new()
             .name("render-backend".to_string())
@@ -229,7 +267,7 @@ impl ViewCache {
                     reader: None,
                 };
                 move || {
-                    backend.backend_render_loop();
+                    backend.backend_command_loop();
                 }
             })
             .unwrap();
@@ -237,24 +275,39 @@ impl ViewCache {
             state: shared_state,
             cmd_chan: cmd_chan_tx,
             thread: backend_thread,
+            keys: vec![],
         }
+    }
+
+    pub fn render(&mut self, times: Range<i64>, keys: &[&str], width: usize) {
+        // Render what data is immediately available (from decimation cache) into a PointData of the provided width
+        // For any information that is not currently available, issue a backend request for an appropriate decimation level.
     }
 
     pub fn get_status(&self) -> LoadingStatus {
         self.state.lock().unwrap().status.clone()
     }
 
-    pub fn with_viewport<F>(&self, mut f: F)
+    pub fn with_cache10000<F>(&self, mut f: F)
     where
-        F: FnMut(&ViewData),
+        F: FnMut(&HashMap<String, Vec<PointSummary>>),
     {
         let state = self.state.lock().unwrap();
-        f(&state.data);
+        f(&state.cache10000);
     }
 
     pub fn set_logreader(&mut self, reader: viaems::LogReader) {
         self.cmd_chan
             .send(ViewBackendCommand::Open(reader))
+            .unwrap();
+        self.cmd_chan
+            .send(ViewBackendCommand::SetKeys {
+                keys: vec![
+                    "rpm".to_owned(),
+                    "sensor.map".to_owned(),
+                    "sensor.ego".to_owned(),
+                ],
+            })
             .unwrap();
     }
 }

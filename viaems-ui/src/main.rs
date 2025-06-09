@@ -175,6 +175,7 @@ fn main() -> Result<(), eframe::Error> {
                         view_cache::LoadingStatus::Loading { progress } => {
                             log_str += &format!(" {:.0}%", progress)
                         }
+                        view_cache::LoadingStatus::Idle => log_str += " Idle",
                     }
                     ui.label(log_str);
                     ui.label(format!(
@@ -186,7 +187,6 @@ fn main() -> Result<(), eframe::Error> {
             };
         });
         egui::CentralPanel::default().show(ctx, |ui| {
-            //            log_view::render_log_view(ui, &mut state.view);
             state.logview.ui(ui);
         });
         ctx.request_repaint();
