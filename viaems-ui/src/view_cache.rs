@@ -304,6 +304,8 @@ impl ViewCache {
         //
 
         let ns_per_pixel = (times.end - times.start) / width as i64;
+        let mut render = Vec::<Option<PointSummary>>::new();
+        render.resize_with(width, || None);
 
         if ns_per_pixel > 5000000000 { // More than 5 seconds per pixel
              // Use cache10k
