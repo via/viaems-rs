@@ -7,6 +7,7 @@ use std::time::SystemTime;
 
 use eframe::egui::containers::Frame;
 use eframe::egui::{self, Pos2};
+use egui::Rect;
 use emath::RectTransform;
 use epaint;
 
@@ -147,23 +148,30 @@ impl egui_tiles::Behavior<Pane> for LogViewerBehavior {
         let drawrect = ui.max_rect();
         let normal_rect = egui::Rect::from_x_y_ranges(0.0..=1.0, 0.0..=1.0);
         for series in &config.series {
-            cache.with_cache10000(|vp| {
+            cache.with_cache100(|vp| {
                 if let Some(points) = vp.get(&series.name) {
                     let tf = RectTransform::from_to(normal_rect, drawrect);
 
                     let start = points.first().unwrap().time.start;
                     let end = points.last().unwrap().time.end;
 
-                    let stroke = egui::Stroke::new(1.0, series.color);
+                    println!("points: {}", points.len());
                     for ps in points.iter() {
-                        let normalized_x = (ps.time.start - start) as f32 / (end - start) as f32;
-                        let normalized_min = 1.0 - (ps.value.start / series.max as f32);
-                        let normalized_max = 1.0 - (ps.value.end / series.max as f32);
-                        let min_point = tf.transform_pos(Pos2::new(normalized_x, normalized_min));
-                        let max_point = tf.transform_pos(Pos2::new(normalized_x, normalized_max));
+                        let normalized_x1 = (ps.time.start - start) as f32 / (end - start) as f32;
+                        let normalized_x2 = (ps.time.end - start) as f32 / (end - start) as f32;
+                        let normalized_y2 = 1.0 - (ps.value.start / series.max as f32);
+                        let normalized_y1 = 1.0 - (ps.value.end / series.max as f32);
 
-                        ui.painter()
-                            .add(epaint::Shape::line(vec![min_point, max_point], stroke));
+                        let r = tf.transform_rect(Rect::from_x_y_ranges(
+                            normalized_x1..=normalized_x2,
+                            normalized_y1..=normalized_y2,
+                        ));
+
+                        ui.painter().add(epaint::Shape::rect_filled(
+                            r,
+                            egui::CornerRadius::ZERO,
+                            series.color,
+                        ));
                     }
                     if let Some(mouse_position) = ui.input(|i| i.pointer.hover_pos()) {
                         let value_at_mouse = 100.0;

@@ -240,6 +240,7 @@ impl LogReader {
                 "BIGINT" => datatypes::DataType::Int64,
                 "UINTEGER" => datatypes::DataType::UInt32,
                 "FLOAT" => datatypes::DataType::Float32,
+                "DOUBLE" => datatypes::DataType::Float64,
                 _ => {
                     return Err(Error::FeedKeysMismatch(format!(
                         "unknown type in log for {}: {}",

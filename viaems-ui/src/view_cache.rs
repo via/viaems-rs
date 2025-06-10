@@ -168,9 +168,6 @@ impl Backend {
 
                     let casted;
                     let values = match data.data_type() {
-                        viaems::arrow::datatypes::DataType::Float32 => data
-                            .as_primitive::<viaems::arrow::datatypes::Float32Type>()
-                            .values(),
                         viaems::arrow::datatypes::DataType::UInt32 => {
                             casted =
                                 compute::cast(data, &viaems::arrow::datatypes::DataType::Float32)
@@ -179,7 +176,26 @@ impl Backend {
                                 .as_primitive::<viaems::arrow::datatypes::Float32Type>()
                                 .values()
                         }
-                        _ => panic!("Unrecognized type in conversion"),
+                        viaems::arrow::datatypes::DataType::Int64 => {
+                            casted =
+                                compute::cast(data, &viaems::arrow::datatypes::DataType::Float32)
+                                    .unwrap();
+                            casted
+                                .as_primitive::<viaems::arrow::datatypes::Float32Type>()
+                                .values()
+                        }
+                        viaems::arrow::datatypes::DataType::Float32 => data
+                            .as_primitive::<viaems::arrow::datatypes::Float32Type>()
+                            .values(),
+                        viaems::arrow::datatypes::DataType::Float64 => {
+                            casted =
+                                compute::cast(data, &viaems::arrow::datatypes::DataType::Float32)
+                                    .unwrap();
+                            casted
+                                .as_primitive::<viaems::arrow::datatypes::Float32Type>()
+                                .values()
+                        }
+                        _ => panic!("Unrecognized type in conversion: {}", data.data_type()),
                     };
 
                     let pg100 = &mut current_cache100[idx];
@@ -279,13 +295,39 @@ impl ViewCache {
         }
     }
 
-    pub fn render(&mut self, times: Range<i64>, keys: &[&str], width: usize) {
-        // Render what data is immediately available (from decimation cache) into a PointData of the provided width
-        // For any information that is not currently available, issue a backend request for an appropriate decimation level.
+    pub fn render(&mut self, times: Range<i64>, key: &str, width: usize) {
+        // Render what data is immediately available (from decimation cache) into a
+        // Vec of PointSummaryS of length `width` for `key`. If the provided range and
+        // width demands more resolution than the cache provides, a hot store of
+        // un-summarized points will be used -- and if it is not applicable, an update
+        // request will be sent to the backend
+        //
+
+        let ns_per_pixel = (times.end - times.start) / width as i64;
+
+        if ns_per_pixel > 5000000000 { // More than 5 seconds per pixel
+             // Use cache10k
+        } else if ns_per_pixel > 50000000 { // more than 50 ms per pixel
+             // Use cache 100
+        } else {
+            // Does the hotcache contain what we need?
+        }
     }
 
     pub fn get_status(&self) -> LoadingStatus {
         self.state.lock().unwrap().status.clone()
+    }
+
+    pub fn get_point_count(&self) -> usize {
+        self.state.lock().unwrap().point_count
+    }
+
+    pub fn with_cache100<F>(&self, mut f: F)
+    where
+        F: FnMut(&HashMap<String, Vec<PointSummary>>),
+    {
+        let state = self.state.lock().unwrap();
+        f(&state.cache100);
     }
 
     pub fn with_cache10000<F>(&self, mut f: F)
