@@ -26,6 +26,24 @@ pub struct PointSummary {
     pub value: Range<f32>,
 }
 
+impl PointSummary {
+    fn add(&mut self, other: &PointSummary) {
+        if other.time.end > self.time.end {
+            self.time.end = other.time.end;
+        }
+        if other.time.start < self.time.start {
+            self.time.start = other.time.start;
+        }
+
+        if other.value.end > self.value.end {
+            self.value.end = other.value.end;
+        }
+        if other.value.start < self.value.start {
+            self.value.start = other.value.start;
+        }
+    }
+}
+
 /// Actual state that is shared between the frontend ViewCache and the Backend worker
 struct ViewSharedState {
     status: LoadingStatus,
@@ -295,7 +313,12 @@ impl ViewCache {
         }
     }
 
-    pub fn render(&mut self, times: Range<i64>, key: &str, width: usize) {
+    pub fn render(
+        &mut self,
+        times: Range<i64>,
+        key: &str,
+        width: usize,
+    ) -> Vec<Option<PointSummary>> {
         // Render what data is immediately available (from decimation cache) into a
         // Vec of PointSummaryS of length `width` for `key`. If the provided range and
         // width demands more resolution than the cache provides, a hot store of
@@ -307,13 +330,47 @@ impl ViewCache {
         let mut render = Vec::<Option<PointSummary>>::new();
         render.resize_with(width, || None);
 
-        if ns_per_pixel > 5000000000 { // More than 5 seconds per pixel
-             // Use cache10k
-        } else if ns_per_pixel > 50000000 { // more than 50 ms per pixel
-             // Use cache 100
+        let locked = self.state.lock().unwrap();
+        println!("ns_per_pixel: {}", ns_per_pixel);
+
+        let cache = if ns_per_pixel > 1000000000 {
+            // More than 11seconds per pixel
+            &locked.cache10000
+        } else if ns_per_pixel > 10000000 {
+            // more than 10 ms per pixel
+            &locked.cache100
         } else {
+            &locked.cache100
             // Does the hotcache contain what we need?
+        };
+
+        let cache = match cache.get(key) {
+            Some(x) => x,
+            None => return render,
+        };
+
+        let cache_start_idx = cache.partition_point(|x| x.time.start < times.start);
+        let cache_end_idx = cache.partition_point(|x| x.time.end < times.end);
+
+        for idx in cache_start_idx..cache_end_idx {
+            let start_pos = (cache[idx].time.start - times.start) / ns_per_pixel;
+            let end_pos = (cache[idx].time.end - times.start) / ns_per_pixel;
+            for pos in start_pos..=end_pos {
+                match &mut render[pos as usize] {
+                    None => {
+                        render[pos as usize] = Some(PointSummary {
+                            time: cache[idx].time.start..cache[idx].time.end,
+                            value: cache[idx].value.start..cache[idx].value.end,
+                        });
+                    }
+                    Some(x) => {
+                        x.add(&cache[idx]);
+                    }
+                }
+            }
         }
+
+        render
     }
 
     pub fn get_status(&self) -> LoadingStatus {
@@ -324,12 +381,12 @@ impl ViewCache {
         self.state.lock().unwrap().point_count
     }
 
-    pub fn with_cache100<F>(&self, mut f: F)
+    pub fn with_cache100<F, R>(&self, mut f: F) -> R
     where
-        F: FnMut(&HashMap<String, Vec<PointSummary>>),
+        F: FnMut(&HashMap<String, Vec<PointSummary>>) -> R,
     {
         let state = self.state.lock().unwrap();
-        f(&state.cache100);
+        f(&state.cache100)
     }
 
     pub fn with_cache10000<F>(&self, mut f: F)

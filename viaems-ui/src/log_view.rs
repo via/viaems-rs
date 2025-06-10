@@ -144,43 +144,44 @@ impl egui_tiles::Behavior<Pane> for LogViewerBehavior {
             .iter()
             .find(|x| x.title == pane.name)
             .unwrap();
-        let cache = self.cache.borrow();
+        let mut cache = self.cache.borrow_mut();
         let drawrect = ui.max_rect();
-        let normal_rect = egui::Rect::from_x_y_ranges(0.0..=1.0, 0.0..=1.0);
+
         for series in &config.series {
-            cache.with_cache100(|vp| {
-                if let Some(points) = vp.get(&series.name) {
-                    let tf = RectTransform::from_to(normal_rect, drawrect);
+            let stroke = egui::Stroke::new(1.0, series.color);
 
-                    let start = points.first().unwrap().time.start;
-                    let end = points.last().unwrap().time.end;
-
-                    println!("points: {}", points.len());
-                    for ps in points.iter() {
-                        let normalized_x1 = (ps.time.start - start) as f32 / (end - start) as f32;
-                        let normalized_x2 = (ps.time.end - start) as f32 / (end - start) as f32;
+            if let Some((start, end)) = cache.with_cache100(|vp| {
+                let s = vp.get(&series.name)?;
+                Some((s.first()?.time.start, s.last()?.time.end))
+            }) {
+                for (xpos, maybe_ps) in cache
+                    .render(start..end, &series.name, drawrect.width() as usize)
+                    .iter()
+                    .enumerate()
+                {
+                    if let Some(ps) = maybe_ps {
                         let normalized_y2 = 1.0 - (ps.value.start / series.max as f32);
                         let normalized_y1 = 1.0 - (ps.value.end / series.max as f32);
 
-                        let r = tf.transform_rect(Rect::from_x_y_ranges(
-                            normalized_x1..=normalized_x2,
-                            normalized_y1..=normalized_y2,
-                        ));
+                        let p1 = Pos2 {
+                            x: drawrect.x_range().min + xpos as f32,
+                            y: drawrect.y_range().min + normalized_y1 * drawrect.height(),
+                        };
+                        let p2 = Pos2 {
+                            x: drawrect.x_range().min + xpos as f32,
+                            y: drawrect.y_range().min + normalized_y2 * drawrect.height(),
+                        };
 
-                        ui.painter().add(epaint::Shape::rect_filled(
-                            r,
-                            egui::CornerRadius::ZERO,
-                            series.color,
-                        ));
-                    }
-                    if let Some(mouse_position) = ui.input(|i| i.pointer.hover_pos()) {
-                        let value_at_mouse = 100.0;
-                        ui.label(format!("{}: {}", series.name, value_at_mouse));
+                        ui.painter()
+                            .add(epaint::Shape::line_segment([p1, p2], stroke));
                     }
                 }
-            });
+                if let Some(mouse_position) = ui.input(|i| i.pointer.hover_pos()) {
+                    let value_at_mouse = 100.0;
+                    ui.label(format!("{}: {}", series.name, value_at_mouse));
+                }
+            }
         }
-
         if let Some(mouse_position) = ui.input(|i| i.pointer.hover_pos()) {
             if drawrect.x_range().contains(mouse_position.x) {
                 let stroke = egui::Stroke::new(0.5, egui::Color32::LIGHT_GRAY);
