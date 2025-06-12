@@ -138,6 +138,8 @@ impl egui_tiles::Behavior<Pane> for LogViewerBehavior {
         ui.painter().rect_filled(ui.max_rect(), 2, bgcolor);
         ui.label(&pane.name);
 
+        let maybe_mouse_position = ui.input(|i| i.pointer.hover_pos());
+
         let config = self
             .config
             .panes
@@ -175,14 +177,22 @@ impl egui_tiles::Behavior<Pane> for LogViewerBehavior {
                         ui.painter()
                             .add(epaint::Shape::line_segment([p1, p2], stroke));
                     }
-                }
-                if let Some(mouse_position) = ui.input(|i| i.pointer.hover_pos()) {
-                    let value_at_mouse = 100.0;
-                    ui.label(format!("{}: {}", series.name, value_at_mouse));
+                    if let Some(pos) = maybe_mouse_position {
+                        if drawrect.x_range().contains(pos.x)
+                            && ((pos.x - drawrect.x_range().min) as usize == xpos)
+                        {
+                            let value_at_mouse = if let Some(ps) = maybe_ps {
+                                &format!("{}", ps.value.end)
+                            } else {
+                                "---"
+                            };
+                            ui.label(format!("{}: {}", series.name, value_at_mouse));
+                        }
+                    }
                 }
             }
         }
-        if let Some(mouse_position) = ui.input(|i| i.pointer.hover_pos()) {
+        if let Some(mouse_position) = maybe_mouse_position {
             if drawrect.x_range().contains(mouse_position.x) {
                 let stroke = egui::Stroke::new(0.5, egui::Color32::LIGHT_GRAY);
 

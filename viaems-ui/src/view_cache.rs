@@ -4,9 +4,8 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
-use egui::TextBuffer;
 use viaems;
-use viaems::arrow::array::{AsArray, Datum};
+use viaems::arrow::array::AsArray;
 use viaems::arrow::compute;
 
 #[derive(Clone)]
@@ -50,6 +49,9 @@ struct ViewSharedState {
 
     /// After loading, contains the point count for display purposes
     point_count: usize,
+
+    /// After loading, contains time range for the log
+    time_range: Option<Range<i64>>,
 
     // Store un-summarized view of a single time range
     hotcache: HashMap<String, Vec<PointSummary>>,
@@ -156,6 +158,7 @@ impl Backend {
 
         let mut current_cache100 = Vec::new();
         let mut current_cache10000 = Vec::new();
+        let mut time_range: Option<Range<i64>> = None;
 
         current_cache100.resize_with(refkeys.len(), || SummaryBuilder {
             count: 0,
@@ -179,6 +182,12 @@ impl Backend {
                     .column(0)
                     .as_primitive::<viaems::arrow::datatypes::Int64Type>()
                     .values();
+
+                time_range = if let Some(range) = &time_range {
+                    Some(range.start..*times.last().unwrap())
+                } else {
+                    Some(*times.first().unwrap()..*times.last().unwrap())
+                };
 
                 current_count += batch.num_rows();
                 for (idx, data) in batch.columns().iter().skip(1).enumerate() {
@@ -264,6 +273,7 @@ impl Backend {
                     let mut locked = self.state.lock().unwrap();
                     let progress = current_count as f32 / locked.point_count as f32 * 100.0;
                     locked.status = LoadingStatus::Loading { progress };
+                    locked.time_range = time_range.clone();
                 }
             })
             .unwrap();
@@ -284,6 +294,7 @@ impl ViewCache {
         let shared_state = Arc::new(Mutex::new(ViewSharedState {
             status: LoadingStatus::Done,
             point_count: 0,
+            time_range: None,
             hotcache: HashMap::default(),
             new_data: HashMap::default(),
             cache100: HashMap::default(),
@@ -333,11 +344,11 @@ impl ViewCache {
         let locked = self.state.lock().unwrap();
         println!("ns_per_pixel: {}", ns_per_pixel);
 
-        let cache = if ns_per_pixel > 1000000000 {
-            // More than 11seconds per pixel
+        let cache = if ns_per_pixel > 5000000000 {
+            // More than 5 seconds per pixel
             &locked.cache10000
-        } else if ns_per_pixel > 10000000 {
-            // more than 10 ms per pixel
+        } else if ns_per_pixel > 50000000 {
+            // more than 50 ms per pixel
             &locked.cache100
         } else {
             &locked.cache100
@@ -379,6 +390,10 @@ impl ViewCache {
 
     pub fn get_point_count(&self) -> usize {
         self.state.lock().unwrap().point_count
+    }
+
+    pub fn get_time_range(&self) -> Option<Range<i64>> {
+        self.state.lock().unwrap().time_range.clone()
     }
 
     pub fn with_cache100<F, R>(&self, mut f: F) -> R

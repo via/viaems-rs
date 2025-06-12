@@ -159,7 +159,6 @@ fn main() -> Result<(), eframe::Error> {
                 });
             });
         }
-        let mut point_count = 0;
         egui::TopBottomPanel::bottom("Status").show(ctx, |ui| {
             match &state.target {
                 None => ui.label("Target: Not connected"),
@@ -177,10 +176,18 @@ fn main() -> Result<(), eframe::Error> {
                         }
                         view_cache::LoadingStatus::Idle => log_str += " Idle",
                     }
+                    let delta = state
+                        .view
+                        .borrow()
+                        .get_time_range()
+                        .and_then(|r| Some(r.end - r.start))
+                        .unwrap_or(0);
+                    let point_count = state.view.borrow().get_point_count();
                     ui.label(log_str);
                     ui.label(format!(
-                        "View: {} points in {} ms",
+                        "View: {} points over {} minutes in {} ms",
                         point_count,
+                        delta / (60 * 1000 * 1000 * 1000),
                         render_time.as_millis()
                     ))
                 }
