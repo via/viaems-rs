@@ -31,8 +31,7 @@ pub struct ViewerPaneConfig {
 // Toplevel config for the log viewer
 pub struct ViewerConfig {
     panes: Vec<ViewerPaneConfig>,
-    time_start_ns: i64,
-    time_stop_ns: i64,
+    time_range: Option<Range<i64>>,
 }
 
 impl Default for ViewerConfig {
@@ -69,8 +68,7 @@ impl Default for ViewerConfig {
                     locked: true,
                 },
             ],
-            time_start_ns: 0,
-            time_stop_ns: 0,
+            time_range: None,
         }
     }
 }
@@ -116,6 +114,14 @@ impl LogViewer {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         self.tree.ui(&mut self.behavior, ui);
     }
+
+    pub fn set_time_range(&mut self, range: Range<i64>) {
+        self.behavior.config.time_range = Some(range)
+    }
+
+    pub fn get_time_range(&self) -> Option<Range<i64>> {
+        self.behavior.config.time_range.clone()
+    }
 }
 
 struct LogViewerBehavior {
@@ -147,17 +153,22 @@ impl egui_tiles::Behavior<Pane> for LogViewerBehavior {
             .find(|x| x.title == pane.name)
             .unwrap();
         let mut cache = self.cache.borrow_mut();
+        if self.config.time_range.is_none() {
+            self.config.time_range = cache.get_time_range();
+        }
+
         let drawrect = ui.max_rect();
 
         for series in &config.series {
             let stroke = egui::Stroke::new(1.0, series.color);
 
-            if let Some((start, end)) = cache.with_cache100(|vp| {
-                let s = vp.get(&series.name)?;
-                Some((s.first()?.time.start, s.last()?.time.end))
-            }) {
+            if let Some(range) = &self.config.time_range {
                 for (xpos, maybe_ps) in cache
-                    .render(start..end, &series.name, drawrect.width() as usize)
+                    .render(
+                        range.start..range.end,
+                        &series.name,
+                        drawrect.width() as usize,
+                    )
                     .iter()
                     .enumerate()
                 {

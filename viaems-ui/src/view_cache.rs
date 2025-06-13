@@ -120,10 +120,22 @@ impl Backend {
                 Ok(ViewBackendCommand::Open(r)) => {
                     // Determine overall point count of the file
                     self.set_status(LoadingStatus::Loading { progress: 0.0 });
-                    let earliest = SystemTime::UNIX_EPOCH;
-                    let latest = SystemTime::now();
+                    let earliest = r.get_earliest_time().unwrap();
+                    let latest = r.get_latest_time().unwrap();
                     let total_count = r.point_count_in_range(earliest, latest).unwrap();
+
+                    let earliest_ns = earliest
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos() as i64;
+                    let latest_ns = latest
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos() as i64;
+
                     self.state.lock().unwrap().point_count = total_count as usize;
+                    self.state.lock().unwrap().time_range = Some(earliest_ns..latest_ns);
+
                     self.set_status(LoadingStatus::Done);
                     self.reader = Some(r);
                 }
@@ -273,7 +285,6 @@ impl Backend {
                     let mut locked = self.state.lock().unwrap();
                     let progress = current_count as f32 / locked.point_count as f32 * 100.0;
                     locked.status = LoadingStatus::Loading { progress };
-                    locked.time_range = time_range.clone();
                 }
             })
             .unwrap();
@@ -342,7 +353,6 @@ impl ViewCache {
         render.resize_with(width, || None);
 
         let locked = self.state.lock().unwrap();
-        println!("ns_per_pixel: {}", ns_per_pixel);
 
         let cache = if ns_per_pixel > 5000000000 {
             // More than 5 seconds per pixel
@@ -394,6 +404,10 @@ impl ViewCache {
 
     pub fn get_time_range(&self) -> Option<Range<i64>> {
         self.state.lock().unwrap().time_range.clone()
+    }
+
+    pub fn set_time_range(&mut self, range: Range<i64>) {
+        self.state.lock().unwrap().time_range = Some(range)
     }
 
     pub fn with_cache100<F, R>(&self, mut f: F) -> R

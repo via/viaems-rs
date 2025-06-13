@@ -194,6 +194,20 @@ fn main() -> Result<(), eframe::Error> {
             };
         });
         egui::CentralPanel::default().show(ctx, |ui| {
+            ui.input(|i| {
+                let delta = i.smooth_scroll_delta;
+                if delta.y != 0.0 {
+                    let timerange = state.logview.get_time_range();
+                    if let Some(current) = timerange {
+                        let width = (current.end - current.start) as f64;
+                        let zoomedwidth = (width + width * (delta.y as f64 / 100.0)) as i64;
+                        let new_start = current.end / 2 + current.start / 2 - (zoomedwidth / 2);
+                        let new_end = current.end / 2 + current.start / 2 + (zoomedwidth / 2);
+                        state.logview.set_time_range(new_start..new_end);
+                        println!("width: {}, zoomed: {} ", width, zoomedwidth);
+                    }
+                }
+            });
             state.logview.ui(ui);
         });
         ctx.request_repaint();
