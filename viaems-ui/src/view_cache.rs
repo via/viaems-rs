@@ -376,7 +376,7 @@ impl ViewCache {
         for idx in cache_start_idx..cache_end_idx {
             let start_pos = (cache[idx].time.start - times.start) / ns_per_pixel;
             let end_pos = (cache[idx].time.end - times.start) / ns_per_pixel;
-            for pos in start_pos..=end_pos {
+            for pos in start_pos..end_pos {
                 match &mut render[pos as usize] {
                     None => {
                         render[pos as usize] = Some(PointSummary {

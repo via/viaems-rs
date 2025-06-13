@@ -9,7 +9,7 @@ use egui_file::FileDialog;
 use emath::{GuiRounding, RectTransform};
 use epaint;
 use std::cell::RefCell;
-use std::ops::Index;
+use std::ops::{Index, Range};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
@@ -195,21 +195,35 @@ fn main() -> Result<(), eframe::Error> {
         });
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.input(|i| {
-                let delta = i.smooth_scroll_delta;
-                if delta.x != 0.0 || delta.y != 0.0 {
-                    let timerange = state.logview.get_time_range();
-                    if let Some(current) = timerange {
-                        let width = (current.end - current.start) as f64;
-                        let zoomedwidth = (width + width * (-delta.y as f64 / 100.0)) as i64;
-                        let shiftamt = ((-delta.x as f64 / 100.0) * width) as i64;
+                if let Some(mut timerange) = state.logview.get_time_range() {
+                    let delta = i.smooth_scroll_delta;
+                    if delta.x != 0.0 || delta.y != 0.0 {
+                        let zoom = -delta.y as f64 / 100.0;
+                        let shift = delta.x as f64 / 100.0;
+
+                        let width = (timerange.end - timerange.start) as f64;
+                        let zoomedwidth = (width + width * zoom) as i64;
+                        let shiftamt = (shift * width) as i64;
 
                         let new_start =
-                            shiftamt + current.end / 2 + current.start / 2 - (zoomedwidth / 2);
+                            shiftamt + timerange.end / 2 + timerange.start / 2 - (zoomedwidth / 2);
                         let new_end =
-                            shiftamt + current.end / 2 + current.start / 2 + (zoomedwidth / 2);
-                        state.logview.set_time_range(new_start..new_end);
-                        println!("width: {}, zoomed: {} ", width, zoomedwidth);
+                            shiftamt + timerange.end / 2 + timerange.start / 2 + (zoomedwidth / 2);
+
+                        timerange = new_start..new_end;
                     }
+
+                    let drag = i.pointer.delta().to_pos2();
+                    if i.pointer.is_decidedly_dragging() && drag.x != 0.0 {
+                        let dragratio = (-drag.x / ui.available_width()) as f64;
+                        let width = (timerange.end - timerange.start) as f64;
+
+                        let new_start = timerange.start + (width * dragratio) as i64;
+                        let new_end = timerange.end + (width * dragratio) as i64;
+                        timerange = new_start..new_end;
+                    }
+
+                    state.logview.set_time_range(timerange);
                 }
             });
             state.logview.ui(ui);
