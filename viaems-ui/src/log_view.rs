@@ -154,7 +154,7 @@ impl egui_tiles::Behavior<Pane> for LogViewerBehavior {
             .unwrap();
         let mut cache = self.cache.borrow_mut();
         if self.config.time_range.is_none() {
-            self.config.time_range = cache.get_time_range();
+            self.config.time_range = cache.get_log_time_range();
         }
 
         let drawrect = ui.max_rect();

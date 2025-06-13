@@ -81,23 +81,39 @@ enum ViewBackendCommand {
 
 struct SummaryBuilder {
     count: usize,
-    summary: PointSummary,
+    summary: Option<PointSummary>,
 }
 
 impl SummaryBuilder {
     fn has_time_gap(&self, time: i64) -> bool {
-        time - self.summary.time.end > Duration::from_secs(1).as_nanos() as i64
+        if let Some(summary) = &self.summary {
+            time - summary.time.end > Duration::from_secs(1).as_nanos() as i64
+        } else {
+            false
+        }
     }
 
     fn add(&mut self, time: i64, value: f32) {
-        self.summary.time.end = time;
-        if value > self.summary.value.end {
-            self.summary.value.end = value;
-        }
-        if value < self.summary.value.start {
-            self.summary.value.start = value;
+        if let Some(summary) = &mut self.summary {
+            summary.time.end = time;
+            if value > summary.value.end {
+                summary.value.end = value;
+            }
+            if value < summary.value.start {
+                summary.value.start = value;
+            }
+        } else {
+            self.summary = Some(PointSummary {
+                time: time..time,
+                value: value..value,
+            });
         }
         self.count += 1;
+    }
+
+    fn reset(&mut self) {
+        self.summary = None;
+        self.count = 0;
     }
 }
 
@@ -174,18 +190,12 @@ impl Backend {
 
         current_cache100.resize_with(refkeys.len(), || SummaryBuilder {
             count: 0,
-            summary: PointSummary {
-                time: 0..0,
-                value: 0.0..0.0,
-            },
+            summary: None,
         });
 
         current_cache10000.resize_with(refkeys.len(), || SummaryBuilder {
             count: 0,
-            summary: PointSummary {
-                time: 0..0,
-                value: 0.0..0.0,
-            },
+            summary: None,
         });
 
         reader
@@ -244,40 +254,30 @@ impl Backend {
                         let value = values[row_idx];
 
                         // If its the first one, reset everything
-                        if pg100.count == 0 {
-                            pg100.summary.time = times[row_idx]..times[row_idx];
-                            pg100.summary.value = value..value;
-                        }
-
-                        if pg10000.count == 0 {
-                            pg10000.summary.time = times[row_idx]..times[row_idx];
-                            pg10000.summary.value = value..value;
-                        }
-
-                        pg100.add(times[row_idx], value);
-                        pg10000.add(times[row_idx], value);
-
-                        if pg100.count == 100 {
+                        if pg100.count == 99 || pg100.has_time_gap(times[row_idx]) {
                             // Complete the group, add to the result
-                            pg100.count = 0;
                             let mut locked = self.state.lock().unwrap();
                             locked
                                 .cache100
                                 .entry(col_name.to_owned())
                                 .or_insert(vec![])
-                                .push(pg100.summary.clone());
+                                .push(pg100.summary.clone().unwrap());
+                            pg100.reset();
                         }
 
-                        if pg10000.count == 10000 {
+                        pg100.add(times[row_idx], value);
+
+                        if pg10000.count == 10000 || pg10000.has_time_gap(times[row_idx]) {
                             // Complete the group, add to the result
-                            pg10000.count = 0;
                             let mut locked = self.state.lock().unwrap();
                             locked
                                 .cache10000
                                 .entry(col_name.to_owned())
                                 .or_insert(vec![])
-                                .push(pg10000.summary.clone());
+                                .push(pg10000.summary.clone().unwrap());
+                            pg10000.reset();
                         }
+                        pg10000.add(times[row_idx], value);
                     }
                 }
 
@@ -402,28 +402,8 @@ impl ViewCache {
         self.state.lock().unwrap().point_count
     }
 
-    pub fn get_time_range(&self) -> Option<Range<i64>> {
+    pub fn get_log_time_range(&self) -> Option<Range<i64>> {
         self.state.lock().unwrap().time_range.clone()
-    }
-
-    pub fn set_time_range(&mut self, range: Range<i64>) {
-        self.state.lock().unwrap().time_range = Some(range)
-    }
-
-    pub fn with_cache100<F, R>(&self, mut f: F) -> R
-    where
-        F: FnMut(&HashMap<String, Vec<PointSummary>>) -> R,
-    {
-        let state = self.state.lock().unwrap();
-        f(&state.cache100)
-    }
-
-    pub fn with_cache10000<F>(&self, mut f: F)
-    where
-        F: FnMut(&HashMap<String, Vec<PointSummary>>),
-    {
-        let state = self.state.lock().unwrap();
-        f(&state.cache10000);
     }
 
     pub fn set_logreader(&mut self, reader: viaems::LogReader) {

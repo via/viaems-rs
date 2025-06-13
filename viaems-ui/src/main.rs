@@ -4,9 +4,9 @@ use clap::Parser;
 use eframe::egui::accesskit::Rect;
 use eframe::egui::containers::Frame;
 use eframe::egui::{self, Pos2};
-use egui::{Sense, Separator};
+use egui::{Sense, Separator, Vec2};
 use egui_file::FileDialog;
-use emath::RectTransform;
+use emath::{GuiRounding, RectTransform};
 use epaint;
 use std::cell::RefCell;
 use std::ops::Index;
@@ -179,7 +179,7 @@ fn main() -> Result<(), eframe::Error> {
                     let delta = state
                         .view
                         .borrow()
-                        .get_time_range()
+                        .get_log_time_range()
                         .and_then(|r| Some(r.end - r.start))
                         .unwrap_or(0);
                     let point_count = state.view.borrow().get_point_count();
@@ -196,13 +196,17 @@ fn main() -> Result<(), eframe::Error> {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.input(|i| {
                 let delta = i.smooth_scroll_delta;
-                if delta.y != 0.0 {
+                if delta.x != 0.0 || delta.y != 0.0 {
                     let timerange = state.logview.get_time_range();
                     if let Some(current) = timerange {
                         let width = (current.end - current.start) as f64;
-                        let zoomedwidth = (width + width * (delta.y as f64 / 100.0)) as i64;
-                        let new_start = current.end / 2 + current.start / 2 - (zoomedwidth / 2);
-                        let new_end = current.end / 2 + current.start / 2 + (zoomedwidth / 2);
+                        let zoomedwidth = (width + width * (-delta.y as f64 / 100.0)) as i64;
+                        let shiftamt = ((-delta.x as f64 / 100.0) * width) as i64;
+
+                        let new_start =
+                            shiftamt + current.end / 2 + current.start / 2 - (zoomedwidth / 2);
+                        let new_end =
+                            shiftamt + current.end / 2 + current.start / 2 + (zoomedwidth / 2);
                         state.logview.set_time_range(new_start..new_end);
                         println!("width: {}, zoomed: {} ", width, zoomedwidth);
                     }
