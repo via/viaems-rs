@@ -372,11 +372,14 @@ impl ViewCache {
 
         let cache_start_idx = cache.partition_point(|x| x.time.start < times.start);
         let cache_end_idx = cache.partition_point(|x| x.time.end < times.end);
-
         for idx in cache_start_idx..cache_end_idx {
-            let start_pos = (cache[idx].time.start - times.start) / ns_per_pixel;
-            let end_pos = (cache[idx].time.end - times.start) / ns_per_pixel;
-            for pos in start_pos..end_pos {
+            let start_pos = ((cache[idx].time.start - times.start) / ns_per_pixel) as usize;
+            let end_pos = ((cache[idx].time.end - times.start) / ns_per_pixel) as usize;
+            for pos in start_pos..=end_pos {
+                if pos >= render.len() {
+                    continue;
+                }
+
                 match &mut render[pos as usize] {
                     None => {
                         render[pos as usize] = Some(PointSummary {

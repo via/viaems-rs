@@ -199,6 +199,11 @@ fn main() -> Result<(), eframe::Error> {
                     let delta = i.smooth_scroll_delta;
                     if delta.x != 0.0 || delta.y != 0.0 {
                         let zoom = -delta.y as f64 / 100.0;
+                        let zoomcenter = i
+                            .pointer
+                            .latest_pos()
+                            .and_then(|p| Some(p.x / ui.available_width()))
+                            .unwrap_or(0.5);
                         let shift = delta.x as f64 / 100.0;
 
                         let width = (timerange.end - timerange.start) as f64;
