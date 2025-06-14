@@ -202,18 +202,17 @@ fn main() -> Result<(), eframe::Error> {
                         let zoomcenter = i
                             .pointer
                             .latest_pos()
-                            .and_then(|p| Some(p.x / ui.available_width()))
-                            .unwrap_or(0.5);
+                            .and_then(|p| Some(p.x / ui.max_rect().width()))
+                            .unwrap_or(0.5) as f64;
                         let shift = delta.x as f64 / 100.0;
 
                         let width = (timerange.end - timerange.start) as f64;
-                        let zoomedwidth = (width + width * zoom) as i64;
                         let shiftamt = (shift * width) as i64;
 
-                        let new_start =
-                            shiftamt + timerange.end / 2 + timerange.start / 2 - (zoomedwidth / 2);
-                        let new_end =
-                            shiftamt + timerange.end / 2 + timerange.start / 2 + (zoomedwidth / 2);
+                        let new_start = shiftamt
+                            + ((timerange.start as f64) - (width * zoom * zoomcenter)) as i64;
+                        let new_end = shiftamt
+                            + ((timerange.end as f64) + (width * zoom * (1.0 - zoomcenter))) as i64;
 
                         timerange = new_start..new_end;
                     }
