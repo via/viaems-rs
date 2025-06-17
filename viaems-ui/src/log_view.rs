@@ -5,9 +5,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use chrono::DateTime;
+
 use eframe::egui::containers::Frame;
 use eframe::egui::{self, Pos2};
-use egui::Rect;
+use egui::{Align, Rect};
 use emath::RectTransform;
 use epaint;
 
@@ -113,6 +115,28 @@ impl LogViewer {
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         self.tree.ui(&mut self.behavior, ui);
+
+        if let Some(range) = &self.behavior.config.time_range {
+            let start_ns = range.start;
+            let stop_ns = range.end;
+            let start = DateTime::from_timestamp_nanos(start_ns);
+            let stop = DateTime::from_timestamp_nanos(stop_ns);
+
+            let one_day = start.date_naive() == stop.date_naive();
+
+            // Put range labels in bottom corner
+            ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::default().with_cross_align(Align::LEFT), |l| {
+                        l.label(start.format("%Y-%m-%d %H:%M:%S").to_string())
+                    });
+                    ui.with_layout(
+                        egui::Layout::default().with_cross_align(Align::RIGHT),
+                        |r| r.label(stop.format("%Y-%m-%d %H:%M:%S").to_string()),
+                    );
+                });
+            });
+        }
     }
 
     pub fn set_time_range(&mut self, range: Range<i64>) {
