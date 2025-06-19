@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::fmt::Pointer;
-use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -13,7 +12,7 @@ use egui::{Align, Rect};
 use emath::RectTransform;
 use epaint;
 
-use crate::view_cache;
+use crate::view_cache::{self, Range};
 use egui_tiles;
 
 #[derive(Clone)]
@@ -117,8 +116,9 @@ impl LogViewer {
         self.tree.ui(&mut self.behavior, ui);
 
         if let Some(range) = &self.behavior.config.time_range {
-            let start_ns = range.start;
-            let stop_ns = range.end;
+            let start_ns = range.min;
+            let stop_ns = range.max;
+
             let start = DateTime::from_timestamp_nanos(start_ns);
             let stop = DateTime::from_timestamp_nanos(stop_ns);
 
@@ -186,19 +186,15 @@ impl egui_tiles::Behavior<Pane> for LogViewerBehavior {
         for series in &config.series {
             let stroke = egui::Stroke::new(1.0, series.color);
 
-            if let Some(range) = &self.config.time_range {
+            if let Some(range) = self.config.time_range {
                 for (xpos, maybe_ps) in cache
-                    .render(
-                        range.start..range.end,
-                        &series.name,
-                        drawrect.width() as usize,
-                    )
+                    .render(range, &series.name, drawrect.width() as usize)
                     .iter()
                     .enumerate()
                 {
                     if let Some(ps) = maybe_ps {
-                        let normalized_y2 = 1.0 - (ps.value.start / series.max as f32);
-                        let normalized_y1 = 1.0 - (ps.value.end / series.max as f32);
+                        let normalized_y2 = 1.0 - (ps.value.min / series.max as f32);
+                        let normalized_y1 = 1.0 - (ps.value.max / series.max as f32);
 
                         let p1 = Pos2 {
                             x: drawrect.x_range().min + xpos as f32,
@@ -217,7 +213,7 @@ impl egui_tiles::Behavior<Pane> for LogViewerBehavior {
                             && ((pos.x - drawrect.x_range().min) as usize == xpos)
                         {
                             let value_at_mouse = if let Some(ps) = maybe_ps {
-                                &format!("{}", ps.value.end)
+                                &format!("{}", ps.value.max)
                             } else {
                                 "---"
                             };

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::ops::Range;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime};
@@ -15,8 +14,40 @@ pub enum LoadingStatus {
     Idle,
 }
 
+#[derive(Clone, Copy)]
+pub struct Range<T> {
+    pub min: T,
+    pub max: T,
+}
+
+impl<T: PartialOrd + Copy> Range<T> {
+    pub fn new(min: T, max: T) -> Range<T> {
+        Range { min, max }
+    }
+
+    pub fn expand_value(&mut self, value: T) {
+        if value > self.max {
+            self.max = value;
+        }
+
+        if value < self.min {
+            self.min = value;
+        }
+    }
+
+    pub fn expand_range(&mut self, r: Self) {
+        if r.max > self.max {
+            self.max = r.max;
+        }
+
+        if r.min < self.min {
+            self.min = r.min;
+        }
+    }
+}
+
 /// Stores a single data point that represents a summary of a time range
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct PointSummary {
     /// Time range represented by the point
     pub time: Range<i64>,
@@ -26,19 +57,20 @@ pub struct PointSummary {
 }
 
 impl PointSummary {
-    fn add(&mut self, other: &PointSummary) {
-        if other.time.end > self.time.end {
-            self.time.end = other.time.end;
-        }
-        if other.time.start < self.time.start {
-            self.time.start = other.time.start;
-        }
+    fn expand_to_include_value(&mut self, time: i64, value: f32) {
+        self.time.expand_value(time);
+        self.value.expand_value(value);
+    }
 
-        if other.value.end > self.value.end {
-            self.value.end = other.value.end;
-        }
-        if other.value.start < self.value.start {
-            self.value.start = other.value.start;
+    fn expand_to_include_summary(&mut self, summary: &Self) {
+        self.time.expand_range(summary.time);
+        self.value.expand_range(summary.value);
+    }
+
+    fn new(time: i64, value: f32) -> PointSummary {
+        PointSummary {
+            time: Range::<i64>::new(time, time),
+            value: Range::<f32>::new(value, value),
         }
     }
 }
@@ -76,7 +108,7 @@ enum ViewBackendCommand {
     Open(viaems::LogReader),
     Die,
     SetKeys { keys: Vec<String> },
-    SetHotCache { start_ns: i64, stop_ns: i64 },
+    SetHotCache { range: Range<i64> },
 }
 
 struct SummaryBuilder {
@@ -87,7 +119,7 @@ struct SummaryBuilder {
 impl SummaryBuilder {
     fn has_time_gap(&self, time: i64) -> bool {
         if let Some(summary) = &self.summary {
-            time - summary.time.end > Duration::from_secs(1).as_nanos() as i64
+            time - summary.time.max > Duration::from_secs(1).as_nanos() as i64
         } else {
             false
         }
@@ -95,18 +127,9 @@ impl SummaryBuilder {
 
     fn add(&mut self, time: i64, value: f32) {
         if let Some(summary) = &mut self.summary {
-            summary.time.end = time;
-            if value > summary.value.end {
-                summary.value.end = value;
-            }
-            if value < summary.value.start {
-                summary.value.start = value;
-            }
+            summary.expand_to_include_value(time, value);
         } else {
-            self.summary = Some(PointSummary {
-                time: time..time,
-                value: value..value,
-            });
+            self.summary = Some(PointSummary::new(time, value));
         }
         self.count += 1;
     }
@@ -150,12 +173,13 @@ impl Backend {
                         .as_nanos() as i64;
 
                     self.state.lock().unwrap().point_count = total_count as usize;
-                    self.state.lock().unwrap().time_range = Some(earliest_ns..latest_ns);
+                    self.state.lock().unwrap().time_range =
+                        Some(Range::new(earliest_ns, latest_ns));
 
                     self.set_status(LoadingStatus::Done);
                     self.reader = Some(r);
                 }
-                Ok(ViewBackendCommand::SetHotCache { start_ns, stop_ns }) => {}
+                Ok(ViewBackendCommand::SetHotCache { range: _ }) => {}
                 Ok(ViewBackendCommand::SetKeys { keys }) => {
                     self.update_decimations(keys);
                 }
@@ -186,7 +210,6 @@ impl Backend {
 
         let mut current_cache100 = Vec::new();
         let mut current_cache10000 = Vec::new();
-        let mut time_range: Option<Range<i64>> = None;
 
         current_cache100.resize_with(refkeys.len(), || SummaryBuilder {
             count: 0,
@@ -204,12 +227,6 @@ impl Backend {
                     .column(0)
                     .as_primitive::<viaems::arrow::datatypes::Int64Type>()
                     .values();
-
-                time_range = if let Some(range) = &time_range {
-                    Some(range.start..*times.last().unwrap())
-                } else {
-                    Some(*times.first().unwrap()..*times.last().unwrap())
-                };
 
                 current_count += batch.num_rows();
                 for (idx, data) in batch.columns().iter().skip(1).enumerate() {
@@ -254,7 +271,7 @@ impl Backend {
                         let value = values[row_idx];
 
                         // If its the first one, reset everything
-                        if pg100.count == 99 || pg100.has_time_gap(times[row_idx]) {
+                        if pg100.count == 100 || pg100.has_time_gap(times[row_idx]) {
                             // Complete the group, add to the result
                             let mut locked = self.state.lock().unwrap();
                             locked
@@ -348,7 +365,7 @@ impl ViewCache {
         // request will be sent to the backend
         //
 
-        let ns_per_pixel = (times.end - times.start) / width as i64;
+        let ns_per_pixel = (times.max - times.min) / width as i64;
         let mut render = Vec::<Option<PointSummary>>::new();
         render.resize_with(width, || None);
 
@@ -370,25 +387,25 @@ impl ViewCache {
             None => return render,
         };
 
-        let cache_start_idx = cache.partition_point(|x| x.time.start < times.start);
-        let cache_end_idx = cache.partition_point(|x| x.time.end < times.end);
+        let cache_start_idx = cache.partition_point(|x| x.time.min < times.min);
+        let cache_end_idx = cache.partition_point(|x| x.time.max < times.max);
         for idx in cache_start_idx..cache_end_idx {
-            let start_pos = ((cache[idx].time.start - times.start) / ns_per_pixel) as usize;
-            let end_pos = ((cache[idx].time.end - times.start) / ns_per_pixel) as usize;
-            for pos in start_pos..=end_pos {
-                if pos >= render.len() {
-                    continue;
-                }
+            let start_pos = ((cache[idx].time.min - times.min) / ns_per_pixel) as usize;
+            let end_pos = ((cache[idx].time.max - times.min) / ns_per_pixel) as usize;
+            if end_pos >= width {
+                println!(
+                    "width: {} start_pos: {} end_pos: {}",
+                    width, start_pos, end_pos
+                );
+            }
+            assert!(start_pos <= end_pos);
+            assert!(end_pos < width);
 
+            for pos in start_pos..=end_pos {
                 match &mut render[pos as usize] {
-                    None => {
-                        render[pos as usize] = Some(PointSummary {
-                            time: cache[idx].time.start..cache[idx].time.end,
-                            value: cache[idx].value.start..cache[idx].value.end,
-                        });
-                    }
+                    None => render[pos as usize] = Some(cache[idx]),
                     Some(x) => {
-                        x.add(&cache[idx]);
+                        x.expand_to_include_summary(&cache[idx]);
                     }
                 }
             }

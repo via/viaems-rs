@@ -4,12 +4,11 @@ use clap::Parser;
 use eframe::egui::accesskit::Rect;
 use eframe::egui::containers::Frame;
 use eframe::egui::{self, Pos2};
-use egui::{Sense, Separator, Vec2};
+use egui::{Sense, Separator, Stroke, Vec2};
 use egui_file::FileDialog;
 use emath::{GuiRounding, RectTransform};
 use epaint;
 use std::cell::RefCell;
-use std::ops::{Index, Range};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
@@ -112,7 +111,6 @@ fn main() -> Result<(), eframe::Error> {
     }
 
     eframe::run_simple_native("Viaems UI", options, move |ctx, _frame| {
-        //ctx.set_visuals(egui::Visuals::light());
         ctx.set_pixels_per_point(1.5);
 
         let now = SystemTime::now();
@@ -180,7 +178,7 @@ fn main() -> Result<(), eframe::Error> {
                         .view
                         .borrow()
                         .get_log_time_range()
-                        .and_then(|r| Some(r.end - r.start))
+                        .and_then(|r| Some(r.max - r.min))
                         .unwrap_or(0);
                     let point_count = state.view.borrow().get_point_count();
                     ui.label(log_str);
@@ -206,25 +204,25 @@ fn main() -> Result<(), eframe::Error> {
                             .unwrap_or(0.5) as f64;
                         let shift = delta.x as f64 / 100.0;
 
-                        let width = (timerange.end - timerange.start) as f64;
+                        let width = (timerange.max - timerange.min) as f64;
                         let shiftamt = (shift * width) as i64;
 
                         let new_start = shiftamt
-                            + ((timerange.start as f64) - (width * zoom * zoomcenter)) as i64;
+                            + ((timerange.min as f64) - (width * zoom * zoomcenter)) as i64;
                         let new_end = shiftamt
-                            + ((timerange.end as f64) + (width * zoom * (1.0 - zoomcenter))) as i64;
+                            + ((timerange.max as f64) + (width * zoom * (1.0 - zoomcenter))) as i64;
 
-                        timerange = new_start..new_end;
+                        timerange = view_cache::Range::new(new_start, new_end);
                     }
 
                     let drag = i.pointer.delta().to_pos2();
                     if i.pointer.is_decidedly_dragging() && drag.x != 0.0 {
                         let dragratio = (-drag.x / ui.available_width()) as f64;
-                        let width = (timerange.end - timerange.start) as f64;
+                        let width = (timerange.max - timerange.min) as f64;
 
-                        let new_start = timerange.start + (width * dragratio) as i64;
-                        let new_end = timerange.end + (width * dragratio) as i64;
-                        timerange = new_start..new_end;
+                        let new_start = timerange.min + (width * dragratio) as i64;
+                        let new_end = timerange.max + (width * dragratio) as i64;
+                        timerange = view_cache::Range::new(new_start, new_end);
                     }
 
                     state.logview.set_time_range(timerange);
