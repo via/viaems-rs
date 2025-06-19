@@ -352,6 +352,40 @@ impl ViewCache {
         }
     }
 
+    fn render_cache_range(
+        times: Range<i64>,
+        cache: &Vec<PointSummary>,
+        dest: &mut [Option<PointSummary>],
+    ) {
+        let cache_start_idx = cache.partition_point(|x| x.time.min < times.min);
+        let cache_end_idx = cache.partition_point(|x| x.time.max < times.max);
+
+        let width = dest.len();
+        let ns_per_pixel = (times.max - times.min) / width as i64;
+
+        for idx in cache_start_idx..cache_end_idx {
+            let start_pos = ((cache[idx].time.min - times.min) / ns_per_pixel) as usize;
+            let end_pos = ((cache[idx].time.max - times.min) / ns_per_pixel) as usize;
+            if end_pos >= width {
+                println!(
+                    "width: {} start_pos: {} end_pos: {}",
+                    width, start_pos, end_pos
+                );
+            }
+            assert!(start_pos <= end_pos);
+            assert!(end_pos < width);
+
+            for pos in start_pos..=end_pos {
+                match &mut dest[pos as usize] {
+                    None => dest[pos as usize] = Some(cache[idx]),
+                    Some(x) => {
+                        x.expand_to_include_summary(&cache[idx]);
+                    }
+                }
+            }
+        }
+    }
+
     pub fn render(
         &mut self,
         times: Range<i64>,
@@ -387,29 +421,7 @@ impl ViewCache {
             None => return render,
         };
 
-        let cache_start_idx = cache.partition_point(|x| x.time.min < times.min);
-        let cache_end_idx = cache.partition_point(|x| x.time.max < times.max);
-        for idx in cache_start_idx..cache_end_idx {
-            let start_pos = ((cache[idx].time.min - times.min) / ns_per_pixel) as usize;
-            let end_pos = ((cache[idx].time.max - times.min) / ns_per_pixel) as usize;
-            if end_pos >= width {
-                println!(
-                    "width: {} start_pos: {} end_pos: {}",
-                    width, start_pos, end_pos
-                );
-            }
-            assert!(start_pos <= end_pos);
-            assert!(end_pos < width);
-
-            for pos in start_pos..=end_pos {
-                match &mut render[pos as usize] {
-                    None => render[pos as usize] = Some(cache[idx]),
-                    Some(x) => {
-                        x.expand_to_include_summary(&cache[idx]);
-                    }
-                }
-            }
-        }
+        Self::render_cache_range(times, cache, render.as_mut_slice());
 
         render
     }
