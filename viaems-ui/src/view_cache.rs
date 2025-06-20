@@ -1,3 +1,4 @@
+use std::arch::x86_64::_mm_undefined_ps;
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
@@ -35,13 +36,37 @@ impl<T: PartialOrd + Copy> Range<T> {
         }
     }
 
-    pub fn expand_range(&mut self, r: Self) {
+    pub fn expand_range(&mut self, r: &Self) {
         if r.max > self.max {
             self.max = r.max;
         }
 
         if r.min < self.min {
             self.min = r.min;
+        }
+    }
+
+    pub fn overlap(&self, other: &Self) -> Option<Self> {
+        // T is only PartialOrd so we cannot just use std::cmp::min/max
+
+        // start = max(self.min, other.min)
+        let start = if self.min > other.min {
+            self.min
+        } else {
+            other.min
+        };
+
+        // end = min(self.max, other.max)
+        let end = if self.max < other.max {
+            self.max
+        } else {
+            other.max
+        };
+
+        if end <= start {
+            None
+        } else {
+            Some(Range::new(start, end))
         }
     }
 }
@@ -63,8 +88,8 @@ impl PointSummary {
     }
 
     fn expand_to_include_summary(&mut self, summary: &Self) {
-        self.time.expand_range(summary.time);
-        self.value.expand_range(summary.value);
+        self.time.expand_range(&summary.time);
+        self.value.expand_range(&summary.value);
     }
 
     fn new(time: i64, value: f32) -> PointSummary {
@@ -405,18 +430,25 @@ impl ViewCache {
 
         let locked = self.state.lock().unwrap();
 
-        let cache = if ns_per_pixel > 5000000000 {
+        let main_cache = if ns_per_pixel > 5000000000 {
             // More than 5 seconds per pixel
             &locked.cache10000
-        } else if ns_per_pixel > 50000000 {
+        } else {
             // more than 50 ms per pixel
             &locked.cache100
-        } else {
-            &locked.cache100
-            // Does the hotcache contain what we need?
         };
 
-        let cache = match cache.get(key) {
+        let used_from_hotcache: Option<Range<i64>> = None;
+
+        // If we're zoomed in, try to use the hotcache
+        //        if ns_per_pixel <= 50000000 {
+        //            if let Some(hotcache_series) = locked.hotcache.get(key) {
+        //                let hotcache_range = Range::new(hotcache_series.first())
+        //                let hotcache_overlap = times.overlap(hotcache_series)
+        //            }
+        //        }
+
+        let cache = match main_cache.get(key) {
             Some(x) => x,
             None => return render,
         };
