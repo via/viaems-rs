@@ -1,4 +1,3 @@
-use std::arch::x86_64::_mm_undefined_ps;
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
@@ -8,14 +7,14 @@ use viaems;
 use viaems::arrow::array::AsArray;
 use viaems::arrow::compute;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum LoadingStatus {
     Done,
     Loading { progress: f32 },
     Idle,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Range<T> {
     pub min: T,
     pub max: T,
@@ -69,6 +68,13 @@ impl<T: PartialOrd + Copy> Range<T> {
             Some(Range::new(start, end))
         }
     }
+}
+
+/// Stores a single data point of raw data
+#[derive(Clone, Copy)]
+pub struct Point {
+    pub time: i64,
+    pub value: f32,
 }
 
 /// Stores a single data point that represents a summary of a time range
@@ -132,8 +138,13 @@ enum ViewBackendCommand {
     Close,
     Open(viaems::LogReader),
     Die,
-    SetKeys { keys: Vec<String> },
-    SetHotCache { range: Range<i64> },
+    SetKeys {
+        keys: Vec<String>,
+    },
+    SetHotCache {
+        keys: Vec<String>,
+        range: Range<i64>,
+    },
 }
 
 struct SummaryBuilder {
@@ -204,7 +215,9 @@ impl Backend {
                     self.set_status(LoadingStatus::Done);
                     self.reader = Some(r);
                 }
-                Ok(ViewBackendCommand::SetHotCache { range: _ }) => {}
+                Ok(ViewBackendCommand::SetHotCache { keys, range }) => {
+                    self.set_hot_cache(keys, range);
+                }
                 Ok(ViewBackendCommand::SetKeys { keys }) => {
                     self.update_decimations(keys);
                 }
@@ -216,15 +229,92 @@ impl Backend {
         self.state.lock().unwrap().status = status;
     }
 
-    fn update_decimations(&mut self, new_keys: Vec<String>) {
+    fn set_hot_cache(&mut self, keys: Vec<String>, range: Range<i64>) {
+        println!("set_hot_cache: {:?}", range);
+        let reader = if let Some(r) = &self.reader {
+            r
+        } else {
+            return;
+        };
         self.set_status(LoadingStatus::Loading { progress: 0.0 });
 
+        let refkeys: Vec<&str> = keys.iter().map(|x| x.as_str()).collect();
+        let start_ns = SystemTime::UNIX_EPOCH + Duration::from_nanos(range.min as u64);
+        let end_ns = SystemTime::UNIX_EPOCH + Duration::from_nanos(range.max as u64);
+
+        // TODO:
+        // - If no overlap in current hotcache, delete it
+        // - If adding a range that does overlap, extend it in either direction
+        //   - But then, if it exceeds some hueristic length, delete parts to keep it small
+        //
+        // But for now, just replace it
+
+        let mut newhotcache = HashMap::<String, Vec<PointSummary>>::new();
+
+        reader
+            .query_arrow(start_ns, end_ns, &refkeys, |batch| {
+                let times = batch
+                    .column(0)
+                    .as_primitive::<viaems::arrow::datatypes::Int64Type>()
+                    .values();
+
+                for (idx, data) in batch.columns().iter().skip(1).enumerate() {
+                    let col_name = refkeys[idx];
+
+                    let casted;
+                    let values = match data.data_type() {
+                        viaems::arrow::datatypes::DataType::UInt32 => {
+                            casted =
+                                compute::cast(data, &viaems::arrow::datatypes::DataType::Float32)
+                                    .unwrap();
+                            casted
+                                .as_primitive::<viaems::arrow::datatypes::Float32Type>()
+                                .values()
+                        }
+                        viaems::arrow::datatypes::DataType::Int64 => {
+                            casted =
+                                compute::cast(data, &viaems::arrow::datatypes::DataType::Float32)
+                                    .unwrap();
+                            casted
+                                .as_primitive::<viaems::arrow::datatypes::Float32Type>()
+                                .values()
+                        }
+                        viaems::arrow::datatypes::DataType::Float32 => data
+                            .as_primitive::<viaems::arrow::datatypes::Float32Type>()
+                            .values(),
+                        viaems::arrow::datatypes::DataType::Float64 => {
+                            casted =
+                                compute::cast(data, &viaems::arrow::datatypes::DataType::Float32)
+                                    .unwrap();
+                            casted
+                                .as_primitive::<viaems::arrow::datatypes::Float32Type>()
+                                .values()
+                        }
+                        _ => panic!("Unrecognized type in conversion: {}", data.data_type()),
+                    };
+
+                    let ent = newhotcache.entry(col_name.to_owned()).or_insert(Vec::new());
+                    for row_idx in 0..batch.num_rows() {
+                        let value = values[row_idx];
+                        ent.push(PointSummary::new(times[row_idx], value));
+                    }
+                }
+            })
+            .unwrap();
+        self.state.lock().unwrap().hotcache = newhotcache;
+
+        self.set_status(LoadingStatus::Done);
+    }
+
+    fn update_decimations(&mut self, new_keys: Vec<String>) {
         let before = SystemTime::now();
         let reader = if let Some(r) = &self.reader {
             r
         } else {
             return;
         };
+
+        self.set_status(LoadingStatus::Loading { progress: 0.0 });
 
         let start = SystemTime::UNIX_EPOCH;
         let stop = SystemTime::now(); // TODO this should be "max" time
@@ -396,6 +486,7 @@ impl ViewCache {
                     "width: {} start_pos: {} end_pos: {}",
                     width, start_pos, end_pos
                 );
+                continue;
             }
             assert!(start_pos <= end_pos);
             assert!(end_pos < width);
@@ -438,15 +529,52 @@ impl ViewCache {
             &locked.cache100
         };
 
-        let used_from_hotcache: Option<Range<i64>> = None;
+        let mut used_from_hotcache: Option<Range<i64>> = None;
 
         // If we're zoomed in, try to use the hotcache
-        //        if ns_per_pixel <= 50000000 {
-        //            if let Some(hotcache_series) = locked.hotcache.get(key) {
-        //                let hotcache_range = Range::new(hotcache_series.first())
-        //                let hotcache_overlap = times.overlap(hotcache_series)
-        //            }
-        //        }
+        if ns_per_pixel <= 50000000 {
+            let mut request_hotcache = false;
+
+            if let Some(hotcache_series) = locked.hotcache.get(key) {
+                if let (Some(first), Some(last)) = (hotcache_series.first(), hotcache_series.last())
+                {
+                    let hotcache_range = Range::new(first.time.min, last.time.max);
+                    println!("hotcache_range: {:?}", hotcache_range);
+                    used_from_hotcache = times.overlap(&hotcache_range);
+
+                    if let Some(overlap) = used_from_hotcache {
+                        let start_idx = ((overlap.min - times.min) / ns_per_pixel) as usize;
+                        let end_idx = ((overlap.max - times.min) / ns_per_pixel) as usize;
+                        let render_subslice = &mut render.as_mut_slice()[start_idx..end_idx];
+                        Self::render_cache_range(overlap, hotcache_series, render_subslice);
+
+                        if overlap.min > times.min || overlap.max < times.max {
+                            request_hotcache = true;
+                        }
+                    } else {
+                        request_hotcache = true;
+                    }
+                } else {
+                    request_hotcache = true;
+                }
+            } else {
+                request_hotcache = true;
+            }
+
+            // If not currently loading, and we weren't able to fulfill the whole range, issue a load`
+            if locked.status == LoadingStatus::Done && request_hotcache {
+                self.cmd_chan
+                    .send(ViewBackendCommand::SetHotCache {
+                        keys: self.keys.clone(),
+                        range: times,
+                    })
+                    .unwrap();
+            }
+        }
+
+        if used_from_hotcache.is_some() {
+            return render;
+        }
 
         let cache = match main_cache.get(key) {
             Some(x) => x,
@@ -471,16 +599,17 @@ impl ViewCache {
     }
 
     pub fn set_logreader(&mut self, reader: viaems::LogReader) {
+        self.keys = vec![
+            "rpm".to_owned(),
+            "sensor.map".to_owned(),
+            "sensor.ego".to_owned(),
+        ];
         self.cmd_chan
             .send(ViewBackendCommand::Open(reader))
             .unwrap();
         self.cmd_chan
             .send(ViewBackendCommand::SetKeys {
-                keys: vec![
-                    "rpm".to_owned(),
-                    "sensor.map".to_owned(),
-                    "sensor.ego".to_owned(),
-                ],
+                keys: self.keys.clone(),
             })
             .unwrap();
     }
