@@ -217,7 +217,10 @@ impl egui_tiles::Behavior<Pane> for LogViewerBehavior {
                             } else {
                                 "---"
                             };
-                            ui.label(format!("{}: {}", series.name, value_at_mouse));
+                            ui.colored_label(
+                                series.color,
+                                format!("{}: {}", series.name, value_at_mouse),
+                            );
                         }
                     }
                 }

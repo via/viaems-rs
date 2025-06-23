@@ -230,7 +230,6 @@ impl Backend {
     }
 
     fn set_hot_cache(&mut self, keys: Vec<String>, range: Range<i64>) {
-        println!("set_hot_cache: {:?}", range);
         let reader = if let Some(r) = &self.reader {
             r
         } else {
@@ -239,8 +238,11 @@ impl Backend {
         self.set_status(LoadingStatus::Loading { progress: 0.0 });
 
         let refkeys: Vec<&str> = keys.iter().map(|x| x.as_str()).collect();
-        let start_ns = SystemTime::UNIX_EPOCH + Duration::from_nanos(range.min as u64);
-        let end_ns = SystemTime::UNIX_EPOCH + Duration::from_nanos(range.max as u64);
+        let start_ns = SystemTime::UNIX_EPOCH + Duration::from_nanos(range.min as u64)
+            - Duration::from_secs(1);
+        let end_ns = SystemTime::UNIX_EPOCH
+            + Duration::from_nanos(range.max as u64)
+            + Duration::from_secs(1);
 
         // TODO:
         // - If no overlap in current hotcache, delete it
@@ -539,7 +541,6 @@ impl ViewCache {
                 if let (Some(first), Some(last)) = (hotcache_series.first(), hotcache_series.last())
                 {
                     let hotcache_range = Range::new(first.time.min, last.time.max);
-                    println!("hotcache_range: {:?}", hotcache_range);
                     used_from_hotcache = times.overlap(&hotcache_range);
 
                     if let Some(overlap) = used_from_hotcache {
