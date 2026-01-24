@@ -2,7 +2,7 @@ use std::sync::{mpsc, atomic, Arc};
 use std::time::{SystemTime, Duration};
 use crate::interface;
 use crate::connection::{Connection, ConnError, RxMessage, Writer};
-use rusb::{Context, UsbContext, HotplugBuilder, Device};
+use rusb::{Context, UsbContext, Device};
 use rusb_async::TransferPool;
 
 pub struct UsbConnection {
@@ -13,33 +13,10 @@ pub struct UsbConnection {
     send_thread: Option<std::thread::JoinHandle<()>>,
 }
 
-struct UsbHandle {}
-
-impl<T: UsbContext> rusb::Hotplug<T> for UsbHandle {
-    fn device_arrived(&mut self, device: Device<T>) {
-        println!("ARRIVED {:?}", device);
-    }
-    fn device_left(&mut self, device: Device<T>) {
-        println!("LEFT {:?}", device);
-    }
-}
-
 impl UsbConnection {
     pub fn new() -> UsbConnection {
-//            let bleh = HotplugBuilder::new()
-//                .vendor_id(0x0483)
-//                .product_id(0x5740)
-//                .enumerate(true)
-//                .register::<Context, _>(&context, Box::new(UsbHandle{})).unwrap();
-//
-//            move || {
-//                let bleh = bleh;
-//                loop {
-//                    context.handle_events(None).unwrap();
-//                }
-//            }});
         let context = Context::new().unwrap();
-        let mut devh = context.open_device_with_vid_pid(0x1209, 0x2041).expect("Could not open device");
+        let devh = context.open_device_with_vid_pid(0x1209, 0x2041).expect("Could not open device");
         for i in 0..=2 {
             if devh.kernel_driver_active(i).unwrap() {
                 devh.detach_kernel_driver(i).expect("Could not detach kernel from device");
@@ -71,11 +48,14 @@ impl UsbConnection {
                                 if recv_tx.send(RxMessage{time, payload}).is_err() { break; }
                                 pool.submit_bulk(0x81, bytes).unwrap();
                               },
-                              Err(e) => println!("Failed to decode! {e}"),
+                              Err(e) => {
+                                  println!("Failed to decode! {e}");
+                                  pool.submit_bulk(0x81, bytes).unwrap();
+                              }
                             }
                         },
                         Err(e) => {
-                          println!("{e:?}"); 
+                          println!("Failed to poll: {e:?}"); 
                         },
                     }
 
@@ -94,7 +74,7 @@ impl UsbConnection {
                     match send_rx.recv_timeout(Duration::from_millis(100)) {
                         Ok(msg) => {
                             let bytes = serde_cbor::to_vec(&msg).unwrap();
-                            devh.write_bulk(0x03, &bytes[..], Duration::from_secs(1)).unwrap();
+                            devh.write_bulk(0x01, &bytes[..], Duration::from_secs(1)).unwrap();
                         }
                         Err(mpsc::RecvTimeoutError::Timeout) => continue,
                         _ => break,

@@ -5,14 +5,13 @@ name = "viaems-firmware"
 version = "0.1.0"
 
 [dependencies]
-rtic = { version = "2.1.0", features = ["thumbv7-backend"] }
-rtic-sync = { version = "*" }
-rtic-monotonics = { version = "1.0.0", features = ["cortex-m-systick"] }
-rtic-time = { version = "*" }
 
 stm32f4 = { version = "*", features = ["stm32f427"] }
 stm32-metapac = { version = "*", features=["stm32f427vg"] }
 panic-rtt-target = { version = "0.1.2", features = ["cortex-m"] }
 cortex-m = {version = "*", features=["inline-asm", "critical-section-single-core"]}
+cortex-m-rt = {version = "*"}
 rtt-target = { version = "0.4.0" }
-fugit = { version = "*" }
+
+futures-lite = {default-features=false, version = "*"}
+spin_on = "*"

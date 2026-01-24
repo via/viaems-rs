@@ -1,6 +1,6 @@
 use viaems::{self, connection, interface};
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use ctrlc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime};
@@ -13,11 +13,8 @@ struct CliArgs {
     #[arg(short = 'c', value_enum, default_value_t = ConnectionMode::Usb)]
     mode: ConnectionMode,
 
-    #[arg(short = 's', long, default_value = "127.0.0.1:5556")]
-    udpsrc: String,
-
-    #[arg(short = 'd', long, default_value = "127.0.0.1:5555")]
-    udpdest: String,
+    #[arg(short = 'd', long)]
+    udpdest: Option<String>,
 }
 
 #[derive(ValueEnum, Clone, Debug)]
@@ -41,26 +38,33 @@ enum CliCommands {
 fn main() {
     let args = CliArgs::parse();
 
+    let connection: Box<dyn connection::Connection + Send> = match args.mode {
+        ConnectionMode::Udp => {
+            let dest = if let Some(s) = args.udpdest {
+                s.parse().expect("failed to parse udp destination")
+            } else {
+                connection::DEFAULT_MCAST_ADDR
+            };
+
+            let devices = connection::UdpConnection::detect(dest, Some(Duration::from_millis(100)));
+            if devices.len() == 0 {
+                panic!("Unable to detect ViaEMS and not dest provided");
+            }
+
+            println!("Connecting to {:?} via {:?}", devices[0].target_ucast_ipaddr, devices[0].local_ipaddr);
+            Box::new(connection::UdpConnection::new(&devices[0]))
+        },
+        ConnectionMode::Usb => Box::new(connection::UsbConnection::new()),
+    };
+    
+
     match args.command {
         CliCommands::Record { filename } => {
-            let connection: Box<dyn connection::Connection + Send> = match args.mode {
-                ConnectionMode::Udp => {
-                    Box::new(connection::UdpConnection::new(&args.udpsrc, &args.udpdest))
-                }
-                ConnectionMode::Usb => Box::new(connection::UsbConnection::new()),
-            };
 
             let manager = viaems::Manager::new(connection);
             record(&filename, manager)
         }
         CliCommands::Bootloader => {
-            let connection: Box<dyn connection::Connection + Send> = match args.mode {
-                ConnectionMode::Udp => {
-                    Box::new(connection::UdpConnection::new(&args.udpsrc, &args.udpdest))
-                }
-                ConnectionMode::Usb => Box::new(connection::UsbConnection::new()),
-            };
-
             let manager = viaems::Manager::new(connection);
             bootloader(manager)
         }

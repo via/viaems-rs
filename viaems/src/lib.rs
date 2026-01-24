@@ -1,7 +1,6 @@
 pub mod connection;
 pub mod interface;
 mod log;
-pub mod log_types;
 
 pub use log::LogFeedWriter;
 pub use log::LogReader;

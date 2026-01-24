@@ -77,6 +77,7 @@ pub enum Message {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum FeedValue {
+  Bool(bool),
   Int(u32),
   Float(f32),
 }
@@ -84,6 +85,7 @@ pub enum FeedValue {
 impl fmt::Display for FeedValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+          FeedValue::Bool(x) => write!(f, "{}", x),
           FeedValue::Int(x) => write!(f, "{}", x),
           FeedValue::Float(x) => write!(f, "{}", x),
         }

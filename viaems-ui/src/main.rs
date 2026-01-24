@@ -1,13 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
 use clap::Parser;
-use eframe::egui::accesskit::Rect;
-use eframe::egui::containers::Frame;
-use eframe::egui::{self, Pos2};
-use egui::{Sense, Separator, Stroke, Vec2};
 use egui_file::FileDialog;
-use emath::{GuiRounding, RectTransform};
-use epaint;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -64,11 +58,23 @@ impl<'a> Application {
     }
 
     fn connect_udp(&mut self) {
-        let conn = Box::new(connection::UdpConnection::new(
-            "127.0.0.1:5556",
-            "127.0.0.1:5555",
-        ));
-        //    let conn = Box::new(connection::UsbConnection::new());
+        let devices = connection::UdpConnection::detect(connection::DEFAULT_MCAST_ADDR, Some(Duration::from_millis(100)));
+        if devices.len() > 0 {
+            let conn = Box::new(connection::UdpConnection::new(&devices[0]));
+            let target = viaems::Manager::new(conn);
+            target.on_feed({
+                let feed_state = self.latest_feed.clone();
+                move |time: SystemTime, keys: &Vec<String>, values: &Vec<interface::FeedValue>| {
+                    Application::update_feed(&feed_state, time, keys, values)
+                }
+            });
+
+            self.target = Some(target);
+        }
+    }
+
+    fn connect_usb(&mut self) {
+        let conn = Box::new(connection::UsbConnection::new());
         let target = viaems::Manager::new(conn);
         target.on_feed({
             let feed_state = self.latest_feed.clone();
@@ -134,6 +140,10 @@ fn main() -> Result<(), eframe::Error> {
                 ui.menu_button("Target", |ui| {
                     if ui.button("Open UDP").clicked() {
                         state.connect_udp();
+                        ui.close_menu();
+                    }
+                    if ui.button("Open USB").clicked() {
+                        state.connect_usb();
                         ui.close_menu();
                     }
                 });

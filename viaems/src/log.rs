@@ -1,5 +1,5 @@
 use duckdb;
-use duckdb::arrow::array::{AsArray, PrimitiveArray, RecordBatch, StructArray};
+use duckdb::arrow::array::RecordBatch;
 use duckdb::arrow::datatypes::{self, Schema, SchemaBuilder, SchemaRef};
 use std::sync::mpsc;
 use std::thread;
@@ -85,6 +85,7 @@ impl LogFeedWriter {
 
             for (idx, (k, v)) in std::iter::zip(keys, values).enumerate() {
                 let kt = match v {
+                    interface::FeedValue::Bool(_) => "BOOLEAN",
                     interface::FeedValue::Int(_) => "UINTEGER",
                     interface::FeedValue::Float(_) => "FLOAT",
                 };
@@ -103,6 +104,8 @@ impl LogFeedWriter {
             for (new_key, val) in std::iter::zip(keys, values) {
                 let col_type = if let interface::FeedValue::Int(_) = val {
                     "UINTEGER"
+                } else if let interface::FeedValue::Bool(_) = val {
+                    "BOOLEAN"
                 } else {
                     "FLOAT"
                 };
@@ -176,6 +179,7 @@ impl LogFeedWriter {
 
         let mut params_list = vec![duckdb::types::Value::BigInt(epoch_time)];
         vals.iter().for_each(|v| match v {
+            interface::FeedValue::Bool(x) => params_list.push(duckdb::types::Value::Boolean(*x)),
             interface::FeedValue::Int(x) => params_list.push(duckdb::types::Value::UInt(*x)),
             interface::FeedValue::Float(x) => params_list.push(duckdb::types::Value::Float(*x)),
         });
@@ -237,6 +241,7 @@ impl LogReader {
         }) {
             let (col_name, col_type) = result?;
             let schema_type = match col_type.as_str() {
+                "BOOLEAN" => datatypes::DataType::Boolean,
                 "BIGINT" => datatypes::DataType::Int64,
                 "UINTEGER" => datatypes::DataType::UInt32,
                 "FLOAT" => datatypes::DataType::Float32,
