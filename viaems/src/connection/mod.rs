@@ -1,12 +1,11 @@
-mod usb;
-mod udp;
+pub mod usb;
+pub mod udp;
+pub mod exec;
 
+use std::thread;
 use std::time::{Duration, SystemTime};
-use std::sync::mpsc;
+use std::sync::{atomic, mpsc, Arc};
 use crate::interface;
-
-pub use usb::UsbConnection;
-pub use udp::{UdpConnection, DEFAULT_MCAST_ADDR};
 
 pub struct RxMessage {
     pub time: SystemTime,
@@ -38,9 +37,34 @@ impl Writer {
     }
 }
 
-pub trait Connection {
-    fn recv(&self, timeout: Duration) -> Result<RxMessage, ConnError>;
-    fn get_writer(&self) -> Writer;
+pub struct Connection {
+  recv_thr: Option<thread::JoinHandle<()>>,
+  write_thr: Option<thread::JoinHandle<()>>,
+  running: Arc<atomic::AtomicBool>,
+  rx: mpsc::Receiver<RxMessage>,
+  tx: mpsc::Sender<interface::Message>,
+}
+
+impl Drop for Connection {
+  fn drop(&mut self) {
+    self.running.store(false, atomic::Ordering::Relaxed);
+      if let Some(t) = self.recv_thr.take() {
+          t.join().unwrap();
+      }
+      if let Some(t) = self.write_thr.take() {
+          t.join().unwrap();
+      }
+  }
 }
 
 
+
+impl Connection {
+    pub fn recv(&self, timeout: Duration) -> Result<RxMessage, ConnError> {
+      return Ok(self.rx.recv_timeout(timeout)?);
+    }
+
+    pub fn get_writer(&self) -> Writer {
+        Writer { tx: self.tx.clone() }
+    }
+}

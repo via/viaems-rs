@@ -5,16 +5,9 @@ use crate::connection::{Connection, ConnError, RxMessage, Writer};
 use rusb::{Context, UsbContext, Device};
 use rusb_async::TransferPool;
 
-pub struct UsbConnection {
-    recv_rx: mpsc::Receiver<RxMessage>,
-    send_tx: mpsc::Sender<interface::Message>,
-    running: Arc<atomic::AtomicBool>,
-    recv_thread: Option<std::thread::JoinHandle<()>>,
-    send_thread: Option<std::thread::JoinHandle<()>>,
-}
 
-impl UsbConnection {
-    pub fn new() -> UsbConnection {
+impl Connection {
+    pub fn new_usb() -> Connection {
         let context = Context::new().unwrap();
         let devh = context.open_device_with_vid_pid(0x1209, 0x2041).expect("Could not open device");
         for i in 0..=2 {
@@ -84,36 +77,13 @@ impl UsbConnection {
         });
 
 
-        UsbConnection { 
-          recv_rx, 
-          send_tx, 
+        Connection { 
+          recv_thr: Some(recv_thread),
+          write_thr: Some(send_thread),
           running, 
-          recv_thread: Some(recv_thread),
-          send_thread: Some(send_thread),
+          rx: recv_rx, 
+          tx: send_tx, 
         }
     }
 }
 
-impl Drop for UsbConnection {
-  fn drop(&mut self) {
-    self.running.store(false, atomic::Ordering::Relaxed);
-      if let Some(t) = self.recv_thread.take() {
-          t.join().unwrap();
-      }
-      if let Some(t) = self.send_thread.take() {
-          t.join().unwrap();
-      }
-  }
-}
-
-
-
-impl Connection for UsbConnection {
-    fn recv(&self, timeout: Duration) -> Result<RxMessage, ConnError> {
-      return Ok(self.recv_rx.recv_timeout(timeout)?);
-    }
-
-    fn get_writer(&self) -> Writer {
-        Writer { tx: self.send_tx.clone() }
-    }
-}

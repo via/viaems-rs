@@ -33,7 +33,7 @@ pub struct Manager {
 }
 
 impl Manager {
-    pub fn new(connection: Box<dyn connection::Connection + Send>) -> Manager {
+    pub fn new(connection: connection::Connection) -> Manager {
         let state = Arc::new(Mutex::new(ConnectionState {
             on_feed: None,
             commands: VecDeque::new(),
@@ -55,7 +55,7 @@ impl Manager {
         }
     }
 
-    fn main_loop(conn: Box<dyn connection::Connection>, state: Arc<Mutex<ConnectionState>>) {
+    fn main_loop(conn: connection::Connection, state: Arc<Mutex<ConnectionState>>) {
         let mut current_keys: Option<Vec<String>> = None;
         loop {
             match conn.recv(Duration::from_millis(100)) {

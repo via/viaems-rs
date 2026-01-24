@@ -15,12 +15,16 @@ struct CliArgs {
 
     #[arg(short = 'd', long)]
     udpdest: Option<String>,
+
+    #[arg(short = 'e', long)]
+    exec: Option<String>,
 }
 
 #[derive(ValueEnum, Clone, Debug)]
 enum ConnectionMode {
     Usb,
     Udp,
+    Exec,
 }
 
 #[derive(Subcommand, Debug)]
@@ -38,23 +42,27 @@ enum CliCommands {
 fn main() {
     let args = CliArgs::parse();
 
-    let connection: Box<dyn connection::Connection + Send> = match args.mode {
+    let connection = match args.mode {
+        ConnectionMode::Exec => {
+            let binary = args.exec.unwrap_or("viaems".into());
+            connection::Connection::new_exec(&binary)
+        },
         ConnectionMode::Udp => {
             let dest = if let Some(s) = args.udpdest {
                 s.parse().expect("failed to parse udp destination")
             } else {
-                connection::DEFAULT_MCAST_ADDR
+                connection::udp::DEFAULT_MCAST_ADDR
             };
 
-            let devices = connection::UdpConnection::detect(dest, Some(Duration::from_millis(100)));
+            let devices = connection::udp::detect(dest, Some(Duration::from_millis(100)));
             if devices.len() == 0 {
                 panic!("Unable to detect ViaEMS and not dest provided");
             }
 
             println!("Connecting to {:?} via {:?}", devices[0].target_ucast_ipaddr, devices[0].local_ipaddr);
-            Box::new(connection::UdpConnection::new(&devices[0]))
+            connection::Connection::new_udp(&devices[0])
         },
-        ConnectionMode::Usb => Box::new(connection::UsbConnection::new()),
+        ConnectionMode::Usb => connection::Connection::new_usb()
     };
     
 
