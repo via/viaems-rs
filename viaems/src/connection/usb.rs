@@ -35,17 +35,17 @@ impl Connection {
                     }
                     match pool.poll(Duration::from_secs(1)) {
                         Ok(bytes) => {
-                            match serde_cbor::de::from_slice(&bytes[..]) {
-                              Ok(payload) => {
-                                let time = SystemTime::now();
-                                if recv_tx.send(RxMessage{time, payload}).is_err() { break; }
-                                pool.submit_bulk(0x81, bytes).unwrap();
-                              },
-                              Err(e) => {
-                                  println!("Failed to decode! {e}");
-                                  pool.submit_bulk(0x81, bytes).unwrap();
-                              }
-                            }
+//                            match serde_cbor::de::from_slice(&bytes[..]) {
+//                              Ok(payload) => {
+//                                let time = SystemTime::now();
+//                                if recv_tx.send(RxMessage{time, payload}).is_err() { break; }
+//                                pool.submit_bulk(0x81, bytes).unwrap();
+//                              },
+//                              Err(e) => {
+//                                  println!("Failed to decode! {e}");
+//                                  pool.submit_bulk(0x81, bytes).unwrap();
+//                              }
+//                            }
                         },
                         Err(e) => {
                           println!("Failed to poll: {e:?}"); 
@@ -66,8 +66,8 @@ impl Connection {
                     }
                     match send_rx.recv_timeout(Duration::from_millis(100)) {
                         Ok(msg) => {
-                            let bytes = serde_cbor::to_vec(&msg).unwrap();
-                            devh.write_bulk(0x01, &bytes[..], Duration::from_secs(1)).unwrap();
+//                            let bytes = serde_cbor::to_vec(&msg).unwrap();
+//                            devh.write_bulk(0x01, &bytes[..], Duration::from_secs(1)).unwrap();
                         }
                         Err(mpsc::RecvTimeoutError::Timeout) => continue,
                         _ => break,

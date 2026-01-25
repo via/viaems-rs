@@ -98,41 +98,45 @@ fn read(filename: &str) {
 }
 
 fn bootloader(manager: viaems::Manager) {
-    manager.blocking_command(viaems::interface::Message::Request(
-        viaems::interface::RequestMessage::Bootloader,
-    ));
+    manager.blocking_request(viaems::interface::Request { 
+        id: 0,
+        request: Some(viaems::interface::request::Request::Resettobootloader(
+                viaems::interface::request::ResetToBootloader{}
+                )) 
+    });
 }
 
 enum StatusMsg {
     Terminate,
-    FeedCount { count: u64, rate: f64 },
+    UpdateCount { count: u64, rate: f64 },
 }
 
 fn record(filename: &str, manager: viaems::Manager) {
     let (status_chan_tx, status_chan) = mpsc::channel::<StatusMsg>();
 
-    manager.on_feed({
+    manager.on_update({
         let status_chan_tx = status_chan_tx.clone();
-        let mut writer: Option<viaems::LogFeedWriter> = None;
+        let mut writer: Option<viaems::UpdateWriter> = None;
         let filename = filename.to_owned();
         let mut total_count = 0;
         let mut this_count = 0;
         let mut time_of_last_msg = Instant::now();
-        move |time: SystemTime, keys: &Vec<String>, vals: &Vec<interface::FeedValue>| {
+        move |time: SystemTime, update: &interface::EngineUpdate| {
+            //println!("{:?}", update);
             if writer.is_none() {
                 writer = Some(
-                    viaems::LogFeedWriter::new(&filename, keys.clone(), vals.clone()).unwrap(),
+                    viaems::UpdateWriter::new(&filename).unwrap()
                 );
             }
             if let Some(w) = &mut writer {
-                w.add(time, vals.clone());
+                w.add(time, update.clone());
             }
             this_count += 1;
             let duration = Instant::now() - time_of_last_msg;
             if duration >= Duration::from_secs(1) {
                 total_count += this_count;
                 status_chan_tx
-                    .send(StatusMsg::FeedCount {
+                    .send(StatusMsg::UpdateCount {
                         count: total_count,
                         rate: this_count as f64 / duration.as_secs_f64(),
                     })
@@ -148,7 +152,7 @@ fn record(filename: &str, manager: viaems::Manager) {
     loop {
         match status_chan.recv_timeout(Duration::from_millis(1200)) {
             Ok(StatusMsg::Terminate) => break,
-            Ok(StatusMsg::FeedCount { count, rate }) => {
+            Ok(StatusMsg::UpdateCount { count, rate }) => {
                 println!("Connected! {} feed points received ({:.0}/s)", count, rate);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {

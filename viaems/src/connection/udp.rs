@@ -89,8 +89,8 @@ fn send_loop(socket: UdpSocket, running: Arc<atomic::AtomicBool>, addr: SocketAd
 
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(msg) => {
-                let bytes = serde_cbor::to_vec(&msg).unwrap();
-                socket.send_to(&bytes[..], &addr).unwrap();
+        //        let bytes = serde_cbor::to_vec(&msg).unwrap();
+        //        socket.send_to(&bytes[..], &addr).unwrap();
             },
             Err(mpsc::RecvTimeoutError::Timeout) => (),
             _ => break,
@@ -109,11 +109,11 @@ fn recv_loop(socket: UdpSocket, running: Arc<atomic::AtomicBool>, tx: mpsc::Send
       let recvd = socket.recv_from(&mut recvbuf);
       match recvd {
         Ok((n_bytes, _)) => {
-          let n = serde_cbor::de::from_slice(&recvbuf[0..n_bytes]).unwrap();
-          if tx.send(RxMessage{
-              time: SystemTime::now(),
-              payload: n,
-          }).is_err() { break; }
+//          let n = serde_cbor::de::from_slice(&recvbuf[0..n_bytes]).unwrap();
+//          if tx.send(RxMessage{
+//              time: SystemTime::now(),
+//              payload: n,
+//          }).is_err() { break; }
         },
         Err(e) => match e.kind() {
           std::io::ErrorKind::TimedOut => (),

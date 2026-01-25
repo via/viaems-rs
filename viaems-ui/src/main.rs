@@ -58,9 +58,9 @@ impl<'a> Application {
     }
 
     fn connect_udp(&mut self) {
-        let devices = connection::UdpConnection::detect(connection::DEFAULT_MCAST_ADDR, Some(Duration::from_millis(100)));
+        let devices = connection::udp::detect(connection::DEFAULT_MCAST_ADDR, Some(Duration::from_millis(100)));
         if devices.len() > 0 {
-            let conn = Box::new(connection::UdpConnection::new(&devices[0]));
+            let conn = connection::Connection::new_udp(&devices[0]);
             let target = viaems::Manager::new(conn);
             target.on_feed({
                 let feed_state = self.latest_feed.clone();

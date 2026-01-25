@@ -2,7 +2,7 @@ pub mod connection;
 pub mod interface;
 mod log;
 
-pub use log::LogFeedWriter;
+pub use log::UpdateWriter;
 pub use log::LogReader;
 
 use std::collections::VecDeque;
@@ -12,16 +12,16 @@ use std::time::{Duration, SystemTime};
 
 pub use duckdb::arrow;
 
-type FeedCallback = dyn FnMut(SystemTime, &Vec<String>, &Vec<interface::FeedValue>) -> () + Send;
-type RequestCallback = dyn FnOnce(interface::ResponseValue) -> () + Send;
+type UpdateCallback = dyn FnMut(SystemTime, &interface::EngineUpdate) -> () + Send;
+type RequestCallback = dyn FnOnce(interface::Response) -> () + Send;
 
 struct Command {
     callback: Box<RequestCallback>,
-    message: interface::Message,
+    request: interface::Request,
 }
 
 struct ConnectionState {
-    on_feed: Option<Box<FeedCallback>>,
+    on_update: Option<Box<UpdateCallback>>,
     commands: VecDeque<Command>,
     running: bool,
 }
@@ -35,7 +35,7 @@ pub struct Manager {
 impl Manager {
     pub fn new(connection: connection::Connection) -> Manager {
         let state = Arc::new(Mutex::new(ConnectionState {
-            on_feed: None,
+            on_update: None,
             commands: VecDeque::new(),
             running: true,
         }));
@@ -56,29 +56,25 @@ impl Manager {
     }
 
     fn main_loop(conn: connection::Connection, state: Arc<Mutex<ConnectionState>>) {
-        let mut current_keys: Option<Vec<String>> = None;
         loop {
             match conn.recv(Duration::from_millis(100)) {
-                Ok(connection::RxMessage { time, payload }) => match payload {
-                    interface::Message::Feed { values } => {
+                Ok(connection::RxMessage { time, message }) => match message.msg {
+                    Some(interface::message::Msg::EngineUpdate(eu)) => {
                         let mut state = state.lock().unwrap();
-                        if let Some(keys) = &current_keys {
-                            if let Some(cb) = &mut state.on_feed {
-                                cb(time, &keys, &values);
-                            }
+                        if let Some(cb) = &mut state.on_update {
+                            cb(time, &eu);
                         }
-                    }
-                    interface::Message::Description { keys } => current_keys = Some(keys),
-                    interface::Message::Response { id: _, response } => {
+                    },
+                    Some(interface::message::Msg::Response(response)) => {
                         let mut state = state.lock().unwrap();
                         if let Some(command) = state.commands.pop_front() {
                             (command.callback)(response);
                             if let Some(command) = &state.commands.front() {
-                                let msg = command.message.clone();
-                                conn.get_writer().send(msg);
+                                let req = command.request.clone();
+                                conn.get_writer().send(interface::Message{msg: Some(interface::message::Msg::Request(req))});
                             }
                         }
-                    }
+                    },
                     _ => (),
                 },
 
@@ -93,33 +89,33 @@ impl Manager {
         }
     }
 
-    pub fn on_feed<F>(&self, f: F)
+    pub fn on_update<F>(&self, f: F)
     where
-        F: FnMut(SystemTime, &Vec<String>, &Vec<interface::FeedValue>) -> () + Send + 'static,
+        F: FnMut(SystemTime,  &interface::EngineUpdate) -> () + Send + 'static,
     {
         let mut locked = self.state.lock().unwrap();
-        locked.on_feed = Some(Box::new(f));
+        locked.on_update = Some(Box::new(f));
     }
 
-    pub fn command<F>(&self, msg: interface::Message, callback: F)
+    pub fn command<F>(&self, req: interface::Request, callback: F)
     where
-        F: FnOnce(interface::ResponseValue) -> () + 'static + Send,
+        F: FnOnce(interface::Response) -> () + 'static + Send,
     {
         let mut locked = self.state.lock().unwrap();
         if locked.commands.len() == 0 {
-            self.writer.send(msg.clone());
+            self.writer.send(interface::Message{ msg: Some(interface::message::Msg::Request(req.clone()))});
         }
         let command = Command {
             callback: Box::new(callback),
-            message: msg,
+            request: req,
         };
         locked.commands.push_back(command);
     }
 
-    pub fn blocking_command(&self, msg: interface::Message) -> interface::ResponseValue {
-        let (tx, rx) = mpsc::channel::<interface::ResponseValue>();
+    pub fn blocking_request(&self, req: interface::Request) -> interface::Response {
+        let (tx, rx) = mpsc::channel::<interface::Response>();
 
-        self.command(msg, move |resp: interface::ResponseValue| {
+        self.command(req, move |resp: interface::Response| {
             tx.send(resp).unwrap();
         });
 

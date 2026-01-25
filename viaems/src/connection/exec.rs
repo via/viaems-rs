@@ -1,10 +1,10 @@
 use std::sync::{mpsc, atomic, Arc};
 use crate::connection::{Connection, RxMessage};
 use crate::interface;
+use std::io::{BufRead, BufReader};
 
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, Duration};
-
 
 impl Connection {
     pub fn new_exec(binary: &str) -> Connection {
@@ -19,17 +19,24 @@ impl Connection {
 
         let rx_thr = std::thread::spawn({
             let stdout = subproc.stdout.take().unwrap();
+            let mut buffered_stdout = BufReader::new(stdout);
             let running = running.clone();
             move || {
-                let mut deser = serde_cbor::Deserializer::from_reader(stdout);
+                let mut raw_bytes = vec![];
                 loop {
                     if !running.load(atomic::Ordering::Relaxed) {
                         break;
                     }
-                    match serde::de::Deserialize::deserialize(&mut deser) {
-                        Ok(payload) => {
+
+                    raw_bytes.clear();
+                    buffered_stdout.read_until(0, &mut raw_bytes).expect("failed to read bytes");
+                    let decoded_size = cobs::decode_in_place(raw_bytes.as_mut_slice()).expect("failed to decode cobs frame");
+                    raw_bytes.truncate(decoded_size);
+                    let pdu = &raw_bytes[2..raw_bytes.len()-4];
+                    match prost::Message::decode(pdu) {
+                        Ok(message) => {
                             let time = SystemTime::now();
-                            if recv_tx.send(RxMessage{time, payload}).is_err() { break; }
+                            if recv_tx.send(RxMessage{time, message}).is_err() { break; }
                         },
                         Err(e) => {
                             println!("Failed to decode! {e}");
@@ -50,8 +57,7 @@ impl Connection {
                         break;
                     }
                     match send_rx.recv_timeout(Duration::from_millis(100)) {
-                        Ok(msg) => {
-                            serde_cbor::to_writer(&mut stdin, &msg).expect("Could not write to process");
+                        Ok(_) => {
                         }
                         Err(mpsc::RecvTimeoutError::Timeout) => continue,
                         _ => break,

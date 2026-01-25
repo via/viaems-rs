@@ -5,7 +5,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, SystemTime};
 
-use crate::interface::{self, FeedValue};
+use crate::interface;
 
 #[derive(Debug)]
 pub enum Error {
@@ -40,19 +40,19 @@ impl From<duckdb::arrow::error::ArrowError> for Error {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 enum LogMessage {
-    FeedPoint {
+    Update {
         time: SystemTime,
-        values: Vec<interface::FeedValue>,
+        update: interface::EngineUpdate,
     },
     Terminate,
 }
 
-pub struct LogFeedWriter {
+pub struct UpdateWriter {
     tx: mpsc::Sender<LogMessage>,
     handle: Option<thread::JoinHandle<()>>,
 }
 
-impl Drop for LogFeedWriter {
+impl Drop for UpdateWriter {
     fn drop(&mut self) {
         self.tx.send(LogMessage::Terminate).unwrap();
         let handle = self.handle.take();
@@ -60,70 +60,62 @@ impl Drop for LogFeedWriter {
     }
 }
 
-impl LogFeedWriter {
-    fn ensure_columns(
-        keys: &Vec<String>,
-        values: &Vec<interface::FeedValue>,
-        conn: &duckdb::Connection,
-    ) -> Result<()> {
-        let mut columns = vec![];
-        if let Ok(stmt) = &mut conn.prepare("DESCRIBE TABLE points;") {
-            for result in stmt.query([])?.and_then(|r| -> Result<_> {
-                let col_name: String = r.get("column_name")?;
-                let col_type: String = r.get("column_type")?;
-                Ok((col_name, col_type))
-            }) {
-                columns.push(result?);
-            }
-
-            if columns[0].0 != "realtime_ns" && columns[0].1 != "BIGINT" {
-                return Err(Error::FeedKeysMismatch(
-                    "realtime_ns is not BIGINT".to_owned(),
-                ));
-            }
-            columns.remove(0); // Get rid of time column for comparison
-
-            for (idx, (k, v)) in std::iter::zip(keys, values).enumerate() {
-                let kt = match v {
-                    interface::FeedValue::Bool(_) => "BOOLEAN",
-                    interface::FeedValue::Int(_) => "UINTEGER",
-                    interface::FeedValue::Float(_) => "FLOAT",
-                };
-                if columns[idx].0 != *k || columns[idx].1 != kt {
-                    return Err(Error::FeedKeysMismatch(columns[idx].0.clone()));
-                }
-                if columns.len() != keys.len() {
-                    return Err(Error::FeedKeysMismatch(
-                        "different number of columns".to_owned(),
-                    ));
-                }
-            }
-        } else {
-            // Table did not exist or new database, go ahead and create points
-            let mut query = "CREATE TABLE points (realtime_ns BIGINT, ".to_owned();
-            for (new_key, val) in std::iter::zip(keys, values) {
-                let col_type = if let interface::FeedValue::Int(_) = val {
-                    "UINTEGER"
-                } else if let interface::FeedValue::Bool(_) = val {
-                    "BOOLEAN"
-                } else {
-                    "FLOAT"
-                };
-                query += &format!("\"{}\" {}, ", new_key, col_type);
-            }
-
-            query += ");";
-            conn.execute(&query, [])?;
-        }
+impl UpdateWriter {
+    fn ensure_columns(conn: &duckdb::Connection) -> Result<()> {
+ //       let mut columns = vec![];
+//        if let Ok(stmt) = &mut conn.prepare("DESCRIBE TABLE points;") {
+//            for result in stmt.query([])?.and_then(|r| -> Result<_> {
+//                let col_name: String = r.get("column_name")?;
+//                let col_type: String = r.get("column_type")?;
+//                Ok((col_name, col_type))
+//            }) {
+//                columns.push(result?);
+//            }
+//
+//            if columns[0].0 != "realtime_ns" && columns[0].1 != "BIGINT" {
+//                return Err(Error::FeedKeysMismatch(
+//                    "realtime_ns is not BIGINT".to_owned(),
+//                ));
+//            }
+//            columns.remove(0); // Get rid of time column for comparison
+//
+//            for (idx, (k, v)) in std::iter::zip(keys, values).enumerate() {
+//                let kt = match v {
+//                    interface::FeedValue::Bool(_) => "BOOLEAN",
+//                    interface::FeedValue::Int(_) => "UINTEGER",
+//                    interface::FeedValue::Float(_) => "FLOAT",
+//                };
+//                if columns[idx].0 != *k || columns[idx].1 != kt {
+//                    return Err(Error::FeedKeysMismatch(columns[idx].0.clone()));
+//                }
+//                if columns.len() != keys.len() {
+//                    return Err(Error::FeedKeysMismatch(
+//                        "different number of columns".to_owned(),
+//                    ));
+//                }
+//            }
+//        } else {
+//            // Table did not exist or new database, go ahead and create points
+//            let mut query = "CREATE TABLE points (realtime_ns BIGINT, ".to_owned();
+//            for (new_key, val) in std::iter::zip(keys, values) {
+//                let col_type = if let interface::FeedValue::Int(_) = val {
+//                    "UINTEGER"
+//                } else if let interface::FeedValue::Bool(_) = val {
+//                    "BOOLEAN"
+//                } else {
+//                    "FLOAT"
+//                };
+//                query += &format!("\"{}\" {}, ", new_key, col_type);
+//            }
+//
+//            query += ");";
+//            conn.execute(&query, [])?;
+//        }
 
         Ok(())
     }
 
-    pub fn new(
-        filename: &str,
-        keys: Vec<String>,
-        values: Vec<interface::FeedValue>,
-    ) -> Result<LogFeedWriter> {
+    pub fn new(filename: &str) -> Result<UpdateWriter> {
         let (tx, rx) = mpsc::channel::<LogMessage>();
 
         let conn = duckdb::Connection::open(filename)?;
@@ -131,7 +123,7 @@ impl LogFeedWriter {
         conn.execute("SET autoload_known_extensions = false;", [])?;
         conn.execute("SET lock_configuration = true;", [])?;
 
-        LogFeedWriter::ensure_columns(&keys, &values, &conn)?;
+        UpdateWriter::ensure_columns(&conn)?;
 
         let thr = thread::Builder::new()
             .name("sqlite-feed-writer".to_string())
@@ -141,8 +133,8 @@ impl LogFeedWriter {
 
                 while let Ok(val) = rx.recv() {
                     match val {
-                        LogMessage::FeedPoint { time, values } => {
-                            LogFeedWriter::write(&mut appender, time, values);
+                        LogMessage::Update { time, update } => {
+                            UpdateWriter::write(&mut appender, time, &update);
                             count += 1;
                             if count > 10000 {
                                 appender.flush().unwrap();
@@ -157,19 +149,19 @@ impl LogFeedWriter {
                 }
             })
             .unwrap();
-        Ok(LogFeedWriter {
+        Ok(UpdateWriter {
             tx,
             handle: Some(thr),
         })
     }
 
-    pub fn add(&self, time: SystemTime, values: Vec<interface::FeedValue>) {
+    pub fn add(&self, time: SystemTime, update: interface::EngineUpdate) {
         self.tx
-            .send(LogMessage::FeedPoint { time, values })
+            .send(LogMessage::Update { time, update })
             .unwrap();
     }
 
-    fn write(appender: &mut duckdb::Appender, time: SystemTime, vals: Vec<interface::FeedValue>) {
+    fn write(appender: &mut duckdb::Appender, time: SystemTime, update: &interface::EngineUpdate) {
         let epoch_time: i64 = time
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
@@ -178,15 +170,15 @@ impl LogFeedWriter {
             .unwrap();
 
         let mut params_list = vec![duckdb::types::Value::BigInt(epoch_time)];
-        vals.iter().for_each(|v| match v {
-            interface::FeedValue::Bool(x) => params_list.push(duckdb::types::Value::Boolean(*x)),
-            interface::FeedValue::Int(x) => params_list.push(duckdb::types::Value::UInt(*x)),
-            interface::FeedValue::Float(x) => params_list.push(duckdb::types::Value::Float(*x)),
-        });
-
-        appender
-            .append_row(duckdb::appender_params_from_iter(params_list))
-            .unwrap();
+//        vals.iter().for_each(|v| match v {
+//            interface::FeedValue::Bool(x) => params_list.push(duckdb::types::Value::Boolean(*x)),
+//            interface::FeedValue::Int(x) => params_list.push(duckdb::types::Value::UInt(*x)),
+//            interface::FeedValue::Float(x) => params_list.push(duckdb::types::Value::Float(*x)),
+//        });                                                          kkkkkkkk
+//
+//        appender
+//            .append_row(duckdb::appender_params_from_iter(params_list))
+//            .unwrap();
     }
 }
 

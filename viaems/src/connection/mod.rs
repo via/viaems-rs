@@ -7,11 +7,6 @@ use std::time::{Duration, SystemTime};
 use std::sync::{atomic, mpsc, Arc};
 use crate::interface;
 
-pub struct RxMessage {
-    pub time: SystemTime,
-    pub payload: interface::Message,
-}
-
 pub enum ConnError {
     Timeout,
     Disconnected,
@@ -26,7 +21,6 @@ impl From<mpsc::RecvTimeoutError> for ConnError {
     }
 }
 
-
 pub struct Writer {
     tx: mpsc::Sender<interface::Message>,
 }
@@ -35,6 +29,11 @@ impl Writer {
     pub fn send(&self, msg: interface::Message) {
         self.tx.send(msg).unwrap();
     }
+}
+
+pub struct RxMessage {
+    pub time: SystemTime,
+    pub message: interface::Message,
 }
 
 pub struct Connection {
@@ -56,8 +55,6 @@ impl Drop for Connection {
       }
   }
 }
-
-
 
 impl Connection {
     pub fn recv(&self, timeout: Duration) -> Result<RxMessage, ConnError> {
