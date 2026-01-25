@@ -4,6 +4,7 @@ use duckdb::arrow::datatypes::{self, Schema, SchemaBuilder, SchemaRef};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, SystemTime};
+use std::collections::HashMap;
 
 use crate::interface;
 
@@ -60,57 +61,103 @@ impl Drop for UpdateWriter {
     }
 }
 
+const TABLE_SCHEMA : &'static [(&str, &str)] = &[
+    ("realtime_ns", "BIGINT"),
+    ("cputime", "UINTEGER"),
+    ("sensors.map", "FLOAT"),
+    ("sensors.iat", "FLOAT"),
+    ("sensors.clt", "FLOAT"),
+    ("sensors.brv", "FLOAT"),
+    ("sensors.tps", "FLOAT"),
+    ("sensors.aap", "FLOAT"),
+    ("sensors.frt", "FLOAT"),
+    ("sensors.ego", "FLOAT"),
+    ("sensors.frp", "FLOAT"),
+    ("sensors.eth", "FLOAT"),
+    ("sensors.knock1", "FLOAT"),
+    ("sensors.knock2", "FLOAT"),
+
+    ("sensors.map_fault", "INTEGER"),
+    ("sensors.iat_fault", "INTEGER"),
+    ("sensors.clt_fault", "INTEGER"),
+    ("sensors.brv_fault", "INTEGER"),
+    ("sensors.tps_fault", "INTEGER"),
+    ("sensors.aap_fault", "INTEGER"),
+    ("sensors.frt_fault", "INTEGER"),
+    ("sensors.ego_fault", "INTEGER"),
+    ("sensors.frp_fault", "INTEGER"),
+    ("sensors.eth_fault", "INTEGER"),
+
+    ("sensors.map_rate", "FLOAT"),
+    ("sensors.iat_rate", "FLOAT"),
+    ("sensors.clt_rate", "FLOAT"),
+    ("sensors.brv_rate", "FLOAT"),
+    ("sensors.tps_rate", "FLOAT"),
+    ("sensors.aap_rate", "FLOAT"),
+    ("sensors.frt_rate", "FLOAT"),
+    ("sensors.ego_rate", "FLOAT"),
+    ("sensors.frp_rate", "FLOAT"),
+    ("sensors.eth_rate", "FLOAT"),
+
+    ("position.time", "UINTEGER"),
+    ("position.valid_before_timestamp", "UINTEGER"),
+    ("position.has_position", "BOOLEAN"),
+    ("position.synced", "BOOLEAN"),
+    ("position.loss_cause", "INTEGER"),
+    ("position.last_angle", "FLOAT"),
+    ("position.instantaneous_rpm", "FLOAT"),
+    ("position.average_rpm", "FLOAT"),
+
+    ("calculations.advance", "FLOAT"),
+    ("calculations.dwell_us", "FLOAT"),
+    ("calculations.fuel_us", "FLOAT"),
+    ("calculations.airmass_per_cycle", "FLOAT"),
+    ("calculations.fuelvol_per_cycle", "FLOAT"),
+    ("calculations.tipin_percent", "FLOAT"),
+    ("calculations.injector_dead_time", "FLOAT"),
+    ("calculations.pulse_width_correction", "FLOAT"),
+    ("calculations.lambda", "FLOAT"),
+    ("calculations.ve", "FLOAT"),
+    ("calculations.engine_temp_enrichment", "FLOAT"),
+
+    ("calculations.rpm_limit_cut", "BOOLEAN"),
+    ("calculations.boost_cut", "BOOLEAN"),
+    ("calculations.fuel_overduty_cut", "BOOLEAN"),
+    ("calculations.dwell_overduty_cut", "BOOLEAN"),
+];
+
 impl UpdateWriter {
     fn ensure_columns(conn: &duckdb::Connection) -> Result<()> {
- //       let mut columns = vec![];
-//        if let Ok(stmt) = &mut conn.prepare("DESCRIBE TABLE points;") {
-//            for result in stmt.query([])?.and_then(|r| -> Result<_> {
-//                let col_name: String = r.get("column_name")?;
-//                let col_type: String = r.get("column_type")?;
-//                Ok((col_name, col_type))
-//            }) {
-//                columns.push(result?);
-//            }
-//
-//            if columns[0].0 != "realtime_ns" && columns[0].1 != "BIGINT" {
-//                return Err(Error::FeedKeysMismatch(
-//                    "realtime_ns is not BIGINT".to_owned(),
-//                ));
-//            }
-//            columns.remove(0); // Get rid of time column for comparison
-//
-//            for (idx, (k, v)) in std::iter::zip(keys, values).enumerate() {
-//                let kt = match v {
-//                    interface::FeedValue::Bool(_) => "BOOLEAN",
-//                    interface::FeedValue::Int(_) => "UINTEGER",
-//                    interface::FeedValue::Float(_) => "FLOAT",
-//                };
-//                if columns[idx].0 != *k || columns[idx].1 != kt {
-//                    return Err(Error::FeedKeysMismatch(columns[idx].0.clone()));
-//                }
-//                if columns.len() != keys.len() {
-//                    return Err(Error::FeedKeysMismatch(
-//                        "different number of columns".to_owned(),
-//                    ));
-//                }
-//            }
-//        } else {
-//            // Table did not exist or new database, go ahead and create points
-//            let mut query = "CREATE TABLE points (realtime_ns BIGINT, ".to_owned();
-//            for (new_key, val) in std::iter::zip(keys, values) {
-//                let col_type = if let interface::FeedValue::Int(_) = val {
-//                    "UINTEGER"
-//                } else if let interface::FeedValue::Bool(_) = val {
-//                    "BOOLEAN"
-//                } else {
-//                    "FLOAT"
-//                };
-//                query += &format!("\"{}\" {}, ", new_key, col_type);
-//            }
-//
-//            query += ");";
-//            conn.execute(&query, [])?;
-//        }
+        let mut existing_columns = HashMap::new();
+        if let Ok(stmt) = &mut conn.prepare("DESCRIBE TABLE points;") {
+            for result in stmt.query([])?.and_then(|r| -> Result<_> {
+                let col_name: String = r.get("column_name")?;
+                let col_type: String = r.get("column_type")?;
+                Ok((col_name, col_type))
+            }) {
+                let (n, t) = result.unwrap();
+                existing_columns.entry(n).or_insert(t);
+            }
+
+            for (col_name, col_type) in TABLE_SCHEMA {
+                if let Some(existing_type) = existing_columns.get(*col_name) {
+                    if existing_type != col_type {
+                    return Err(Error::FeedKeysMismatch(col_name.to_string()));
+                    }
+                } else {
+                    // TODO add the column
+                }
+            }
+        } else {
+            // Table did not exist or new database, go ahead and create points
+            let mut query = "CREATE TABLE points (".to_owned();
+            for (new_key, new_type) in TABLE_SCHEMA {
+                query += &format!("\"{}\" {}, ", new_key, new_type);
+            }
+
+            query += ");";
+            conn.execute(&query, [])?;
+        }
 
         Ok(())
     }
@@ -126,7 +173,7 @@ impl UpdateWriter {
         UpdateWriter::ensure_columns(&conn)?;
 
         let thr = thread::Builder::new()
-            .name("sqlite-feed-writer".to_string())
+            .name("duckdb-update-writer".to_string())
             .spawn(move || {
                 let mut appender = conn.appender("points").unwrap();
                 let mut count = 0;
@@ -169,16 +216,78 @@ impl UpdateWriter {
             .try_into()
             .unwrap();
 
-        let mut params_list = vec![duckdb::types::Value::BigInt(epoch_time)];
-//        vals.iter().for_each(|v| match v {
-//            interface::FeedValue::Bool(x) => params_list.push(duckdb::types::Value::Boolean(*x)),
-//            interface::FeedValue::Int(x) => params_list.push(duckdb::types::Value::UInt(*x)),
-//            interface::FeedValue::Float(x) => params_list.push(duckdb::types::Value::Float(*x)),
-//        });                                                          kkkkkkkk
-//
-//        appender
-//            .append_row(duckdb::appender_params_from_iter(params_list))
-//            .unwrap();
+        let sensors = update.sensors.unwrap_or_default();
+        let position = update.position.unwrap_or_default();
+        let calcs = update.calculations.unwrap_or_default();
+
+        let params_list = vec![
+            duckdb::types::Value::BigInt(epoch_time),
+            duckdb::types::Value::UInt(position.time), // TODO change
+            duckdb::types::Value::Float(sensors.map),
+            duckdb::types::Value::Float(sensors.iat),
+            duckdb::types::Value::Float(sensors.clt),
+            duckdb::types::Value::Float(sensors.brv),
+            duckdb::types::Value::Float(sensors.tps),
+            duckdb::types::Value::Float(sensors.aap),
+            duckdb::types::Value::Float(sensors.frt),
+            duckdb::types::Value::Float(sensors.ego),
+            duckdb::types::Value::Float(sensors.frp),
+            duckdb::types::Value::Float(sensors.eth),
+            duckdb::types::Value::Float(sensors.knock1),
+            duckdb::types::Value::Float(sensors.knock2),
+
+            duckdb::types::Value::Int(sensors.map_fault),
+            duckdb::types::Value::Int(sensors.iat_fault),
+            duckdb::types::Value::Int(sensors.clt_fault),
+            duckdb::types::Value::Int(sensors.brv_fault),
+            duckdb::types::Value::Int(sensors.tps_fault),
+            duckdb::types::Value::Int(sensors.aap_fault),
+            duckdb::types::Value::Int(sensors.frt_fault),
+            duckdb::types::Value::Int(sensors.ego_fault),
+            duckdb::types::Value::Int(sensors.frp_fault),
+            duckdb::types::Value::Int(sensors.eth_fault),
+
+            duckdb::types::Value::Float(sensors.map_rate),
+            duckdb::types::Value::Float(sensors.iat_rate),
+            duckdb::types::Value::Float(sensors.clt_rate),
+            duckdb::types::Value::Float(sensors.brv_rate),
+            duckdb::types::Value::Float(sensors.tps_rate),
+            duckdb::types::Value::Float(sensors.aap_rate),
+            duckdb::types::Value::Float(sensors.frt_rate),
+            duckdb::types::Value::Float(sensors.ego_rate),
+            duckdb::types::Value::Float(sensors.frp_rate),
+            duckdb::types::Value::Float(sensors.eth_rate),
+
+            duckdb::types::Value::UInt(position.time),
+            duckdb::types::Value::UInt(position.valid_before_timestamp),
+            duckdb::types::Value::Boolean(position.has_position),
+            duckdb::types::Value::Boolean(position.synced),
+            duckdb::types::Value::Int(position.loss_cause),
+            duckdb::types::Value::Float(position.last_angle),
+            duckdb::types::Value::Float(position.instantaneous_rpm),
+            duckdb::types::Value::Float(position.average_rpm),
+
+            duckdb::types::Value::Float(calcs.advance),
+            duckdb::types::Value::Float(calcs.dwell_us),
+            duckdb::types::Value::Float(calcs.fuel_us),
+            duckdb::types::Value::Float(calcs.airmass_per_cycle),
+            duckdb::types::Value::Float(calcs.fuelvol_per_cycle),
+            duckdb::types::Value::Float(calcs.tipin_percent),
+            duckdb::types::Value::Float(calcs.injector_dead_time),
+            duckdb::types::Value::Float(calcs.pulse_width_correction),
+            duckdb::types::Value::Float(calcs.lambda),
+            duckdb::types::Value::Float(calcs.ve),
+            duckdb::types::Value::Float(calcs.engine_temp_enrichment),
+
+            duckdb::types::Value::Boolean(calcs.rpm_limit_cut),
+            duckdb::types::Value::Boolean(calcs.boost_cut),
+            duckdb::types::Value::Boolean(calcs.fuel_overduty_cut),
+            duckdb::types::Value::Boolean(calcs.dwell_overduty_cut),
+        ];
+
+        appender
+            .append_row(duckdb::appender_params_from_iter(params_list))
+            .unwrap();
     }
 }
 
