@@ -23,6 +23,7 @@ impl Connection {
             let running = running.clone();
             move || {
                 let mut raw_bytes = vec![];
+                let CRC32 = crc::Crc::<u32>::new(&crc::CRC_32_ISO_HDLC);
                 loop {
                     if !running.load(atomic::Ordering::Relaxed) {
                         break;
@@ -30,9 +31,27 @@ impl Connection {
 
                     raw_bytes.clear();
                     buffered_stdout.read_until(0, &mut raw_bytes).expect("failed to read bytes");
+
+                    // Len + CRC is 6 byte minimum
+                    if raw_bytes.len() < 6 || *raw_bytes.last().unwrap() != 0 {
+                        break;
+                    }
+
                     let decoded_size = cobs::decode_in_place(raw_bytes.as_mut_slice()).expect("failed to decode cobs frame");
                     raw_bytes.truncate(decoded_size);
+
                     let pdu = &raw_bytes[2..raw_bytes.len()-4];
+
+                    let len = u16::from_le_bytes(raw_bytes[0..2].try_into().unwrap());
+                    if len as usize != pdu.len() {
+                        println!("Frame is invalid length!");
+                        continue;
+                    }
+                    let crc = u32::from_le_bytes(raw_bytes[decoded_size-4..decoded_size].try_into().unwrap());
+                    if crc != CRC32.checksum(pdu) {
+                        println!("Invalid CRC");
+                        continue;
+                    }
                     match prost::Message::decode(pdu) {
                         Ok(message) => {
                             let time = SystemTime::now();
