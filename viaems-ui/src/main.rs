@@ -13,8 +13,7 @@ mod view_cache;
 
 #[derive(Default)]
 struct FeedState {
-    keys: Vec<String>,
-    values: Vec<interface::FeedValue>,
+    update: interface::EngineUpdate,
     update_time: Option<SystemTime>,
 }
 
@@ -58,14 +57,14 @@ impl<'a> Application {
     }
 
     fn connect_udp(&mut self) {
-        let devices = connection::udp::detect(connection::DEFAULT_MCAST_ADDR, Some(Duration::from_millis(100)));
+        let devices = connection::udp::detect(connection::udp::DEFAULT_MCAST_ADDR, Some(Duration::from_millis(100)));
         if devices.len() > 0 {
             let conn = connection::Connection::new_udp(&devices[0]);
             let target = viaems::Manager::new(conn);
-            target.on_feed({
+            target.on_update({
                 let feed_state = self.latest_feed.clone();
-                move |time: SystemTime, keys: &Vec<String>, values: &Vec<interface::FeedValue>| {
-                    Application::update_feed(&feed_state, time, keys, values)
+                move |time: SystemTime, update: &interface::EngineUpdate| {
+                    Application::update_feed(&feed_state, time, update)
                 }
             });
 
@@ -73,13 +72,13 @@ impl<'a> Application {
         }
     }
 
-    fn connect_usb(&mut self) {
-        let conn = Box::new(connection::UsbConnection::new());
+    fn connect_exec(&mut self) {
+        let conn = connection::Connection::new_exec("/home/via/dev/viaems/obj/hosted/viaems");
         let target = viaems::Manager::new(conn);
-        target.on_feed({
+        target.on_update({
             let feed_state = self.latest_feed.clone();
-            move |time: SystemTime, keys: &Vec<String>, values: &Vec<interface::FeedValue>| {
-                Application::update_feed(&feed_state, time, keys, values)
+            move |time: SystemTime, update: &interface::EngineUpdate| {
+                Application::update_feed(&feed_state, time, update);
             }
         });
 
@@ -89,14 +88,10 @@ impl<'a> Application {
     fn update_feed(
         feed_state: &Arc<Mutex<FeedState>>,
         _: SystemTime,
-        keys: &Vec<String>,
-        values: &Vec<interface::FeedValue>,
+        update: &interface::EngineUpdate,
     ) {
         let mut state = feed_state.lock().unwrap();
-        if state.keys.len() != keys.len() {
-            state.keys = keys.clone();
-        }
-        state.values = values.clone();
+        state.update = update.clone();
         state.update_time = Some(SystemTime::now());
     }
 }
@@ -142,8 +137,8 @@ fn main() -> Result<(), eframe::Error> {
                         state.connect_udp();
                         ui.close_menu();
                     }
-                    if ui.button("Open USB").clicked() {
-                        state.connect_usb();
+                    if ui.button("Open Sim").clicked() {
+                        state.connect_exec();
                         ui.close_menu();
                     }
                 });
@@ -158,11 +153,9 @@ fn main() -> Result<(), eframe::Error> {
                         .num_columns(2)
                         .striped(true)
                         .show(ui, |ui| {
-                            for (k, v) in state.keys.iter().zip(state.values.iter()) {
-                                ui.label(k);
-                                ui.label(v.to_string());
-                                ui.end_row();
-                            }
+                            ui.label("cputime");
+                            ui.label(state.update.header.unwrap_or_default().timestamp.to_string());
+                            ui.end_row();
                         });
                 });
             });
