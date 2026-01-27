@@ -19,7 +19,7 @@ struct FeedState {
 
 struct Application {
     target: Option<viaems::Manager>,
-    log: Option<viaems::LogReader>,
+    log: Option<viaems::Log>,
     latest_feed: Arc<Mutex<FeedState>>,
 
     view: Rc<RefCell<view_cache::ViewCache>>,
@@ -48,11 +48,12 @@ impl<'a> Application {
     }
 
     fn open_log(&mut self, filename: &str) {
-        self.log = Some(viaems::LogReader::new(filename));
+        let log = viaems::Log::new(filename);
 
         self.view
             .borrow_mut()
-            .set_logreader(viaems::LogReader::new(filename));
+            .set_logreader(log.try_clone().expect("Unable to create logview reader"));
+        self.log = Some(log);
         println!("Opening log");
     }
 
@@ -61,10 +62,20 @@ impl<'a> Application {
         if devices.len() > 0 {
             let conn = connection::Connection::new_udp(&devices[0]);
             let target = viaems::Manager::new(conn);
+
+            let logwriter : Option<viaems::UpdateWriter> = if let Some(reader) = &self.log {
+                Some(reader.get_writer().expect("Unable to create log writer"))
+            } else {
+                None 
+            };
+
             target.on_update({
                 let feed_state = self.latest_feed.clone();
                 move |time: SystemTime, update: &interface::EngineUpdate| {
-                    Application::update_feed(&feed_state, time, update)
+                    if let Some(w) = &logwriter {
+                        w.add(time, update.clone());
+                    }
+                    Application::update_feed(&feed_state, time, update);
                 }
             });
 
@@ -77,7 +88,15 @@ impl<'a> Application {
         let target = viaems::Manager::new(conn);
         target.on_update({
             let feed_state = self.latest_feed.clone();
+            let logwriter : Option<viaems::UpdateWriter> = if let Some(reader) = &self.log {
+                Some(reader.get_writer().expect("Unable to create log writer"))
+            } else {
+                None 
+            };
             move |time: SystemTime, update: &interface::EngineUpdate| {
+                if let Some(w) = &logwriter {
+                    w.add(time, update.clone());
+                }
                 Application::update_feed(&feed_state, time, update);
             }
         });
@@ -149,6 +168,212 @@ fn main() -> Result<(), eframe::Error> {
                 ui.label("Live Data");
                 let state = state.latest_feed.lock().unwrap();
                 egui::ScrollArea::vertical().show(ui, |ui| {
+                    egui::CollapsingHeader::new("Sensors").default_open(true).show(ui, |ui| {
+                        let sensors = state.update.sensors.unwrap_or_default();
+                        let render_fault = |ui: &mut egui::Ui, f: interface::SensorFault| {
+                            match f {
+                                interface::SensorFault::SensorNoFault =>
+                                    ui.label(egui::RichText::new("OK").color(egui::Color32::GREEN)),
+                                interface::SensorFault::SensorRangeFault =>
+                                    ui.label(egui::RichText::new("BAD RANGE").color(egui::Color32::RED)),
+                                interface::SensorFault::SensorConnectionFault =>
+                                    ui.label(egui::RichText::new("BAD CONN").color(egui::Color32::RED)),
+                            }
+                        };
+
+                        egui::Grid::new("sensors")
+                            .num_columns(4)
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.label("");
+                                ui.label("Value");
+                                ui.label("Rate");
+                                ui.label("Fault");
+                                ui.end_row();
+
+                                ui.label("MAP");
+                                ui.label(sensors.map.to_string());
+                                ui.label(sensors.map_rate.to_string());
+                                render_fault(ui, sensors.map_fault());
+                                ui.end_row();
+
+                                ui.label("IAT");
+                                ui.label(sensors.iat.to_string());
+                                ui.label(sensors.iat_rate.to_string());
+                                render_fault(ui, sensors.iat_fault());
+                                ui.end_row();
+
+                                ui.label("CLT");
+                                ui.label(sensors.clt.to_string());
+                                ui.label(sensors.clt_rate.to_string());
+                                render_fault(ui, sensors.clt_fault());
+                                ui.end_row();
+
+                                ui.label("BRV");
+                                ui.label(sensors.brv.to_string());
+                                ui.label(sensors.brv_rate.to_string());
+                                render_fault(ui, sensors.brv_fault());
+                                ui.end_row();
+
+                                ui.label("TPS");
+                                ui.label(sensors.tps.to_string());
+                                ui.label(sensors.tps_rate.to_string());
+                                render_fault(ui, sensors.tps_fault());
+                                ui.end_row();
+
+                                ui.label("AAP");
+                                ui.label(sensors.aap.to_string());
+                                ui.label(sensors.aap_rate.to_string());
+                                render_fault(ui, sensors.aap_fault());
+                                ui.end_row();
+
+                                ui.label("FRT");
+                                ui.label(sensors.frt.to_string());
+                                ui.label(sensors.frt_rate.to_string());
+                                render_fault(ui, sensors.frt_fault());
+                                ui.end_row();
+
+                                ui.label("EGO");
+                                ui.label(sensors.ego.to_string());
+                                ui.label(sensors.ego_rate.to_string());
+                                render_fault(ui, sensors.ego_fault());
+                                ui.end_row();
+
+                                ui.label("FRP");
+                                ui.label(sensors.frp.to_string());
+                                ui.label(sensors.frp_rate.to_string());
+                                render_fault(ui, sensors.frp_fault());
+                                ui.end_row();
+
+                                ui.label("ETH");
+                                ui.label(sensors.eth.to_string());
+                                ui.label(sensors.eth_rate.to_string());
+                                render_fault(ui, sensors.eth_fault());
+                                ui.end_row();
+
+                                ui.label("KNK1");
+                                ui.label(sensors.knock1.to_string());
+                                ui.end_row();
+
+                                ui.label("KNK2");
+                                ui.label(sensors.knock2.to_string());
+                                ui.end_row();
+
+                            });
+
+                    });
+                    egui::CollapsingHeader::new("Position").default_open(true).show(ui, |ui| {
+                        let position = state.update.position.unwrap_or_default();
+                        egui::Grid::new("position")
+                            .num_columns(2)
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.label("Sync");
+                                if position.synced {
+                                    ui.label(egui::RichText::new("YES").color(egui::Color32::GREEN));
+                                } else {
+                                    ui.label(egui::RichText::new("NO").color(egui::Color32::RED));
+                                }
+                                ui.end_row();
+
+                                if !position.synced {
+                                    ui.label("Sync Loss Reason");
+                                    ui.label(position.loss_cause().as_str_name());
+                                    ui.end_row();
+                                }
+
+                                ui.label("Angle");
+                                ui.label(position.last_angle.to_string());
+                                ui.end_row();
+
+                                ui.label("RPM");
+                                ui.label(position.average_rpm.to_string());
+                                ui.end_row();
+
+                            });
+                        });
+                    egui::CollapsingHeader::new("Calculations").default_open(true).show(ui, |ui| {
+                        let calcs = state.update.calculations.unwrap_or_default();
+                        egui::Grid::new("calcs")
+                            .num_columns(2)
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.label("Timing Advance");
+                                ui.label(calcs.advance.to_string());
+                                ui.end_row();
+
+                                ui.label("Dwell (uS)");
+                                ui.label(calcs.dwell_us.to_string());
+                                ui.end_row();
+
+                                ui.label("Fuel (uS)");
+                                ui.label(calcs.fuel_us.to_string());
+                                ui.end_row();
+
+                                ui.label("Lambda");
+                                ui.label(calcs.lambda.to_string());
+                                ui.end_row();
+
+                                ui.label("VE");
+                                ui.label(calcs.ve.to_string());
+                                ui.end_row();
+
+                                ui.label("Temp Enrichment (%)");
+                                ui.label(calcs.engine_temp_enrichment.to_string());
+                                ui.end_row();
+
+                                ui.separator();
+                                ui.end_row();
+
+                                ui.label("Airmass per cycle (g)");
+                                ui.label(calcs.airmass_per_cycle.to_string());
+                                ui.end_row();
+
+                                ui.label("Fuel volume per cycle (cc)");
+                                ui.label(calcs.fuelvol_per_cycle.to_string());
+                                ui.end_row();
+
+                                ui.label("Pulsewidth Correction (mS)");
+                                ui.label(calcs.pulse_width_correction.to_string());
+                                ui.end_row();
+
+                                ui.separator();
+                                ui.end_row();
+
+                                ui.label("RPM Limiter");
+                                if calcs.rpm_limit_cut {
+                                    ui.label(egui::RichText::new("ON").color(egui::Color32::GREEN));
+                                } else {
+                                    ui.label(egui::RichText::new("OFF").color(egui::Color32::GREEN));
+                                }
+                                ui.end_row();
+
+                                ui.label("Boost Limiter");
+                                if calcs.boost_cut {
+                                    ui.label(egui::RichText::new("ON").color(egui::Color32::GREEN));
+                                } else {
+                                    ui.label(egui::RichText::new("OFF").color(egui::Color32::GREEN));
+                                }
+                                ui.end_row();
+
+                                ui.label("Fuel Limiter");
+                                if calcs.fuel_overduty_cut {
+                                    ui.label(egui::RichText::new("ON").color(egui::Color32::GREEN));
+                                } else {
+                                    ui.label(egui::RichText::new("OFF").color(egui::Color32::GREEN));
+                                }
+                                ui.end_row();
+
+                                ui.label("Dwell Limiter");
+                                if calcs.dwell_overduty_cut {
+                                    ui.label(egui::RichText::new("ON").color(egui::Color32::GREEN));
+                                } else {
+                                    ui.label(egui::RichText::new("OFF").color(egui::Color32::GREEN));
+                                }
+                                ui.end_row();
+
+                            });
+                        });
                     egui::Grid::new("feed")
                         .num_columns(2)
                         .striped(true)
@@ -196,7 +421,19 @@ fn main() -> Result<(), eframe::Error> {
         });
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.input(|i| {
-                if let Some(mut timerange) = state.logview.get_time_range() {
+                // TODO this follow mode should be an explicit option in the UI
+                if state.target.is_some() && state.log.is_some() {
+                    let now = SystemTime::now();
+                    let twentyago = now - Duration::from_secs(20);
+                    state.logview.set_time_range(view_cache::Range::new(
+                        twentyago.duration_since(SystemTime::UNIX_EPOCH)
+                                  .unwrap()
+                                  .as_nanos() as i64,
+                        now.duration_since(SystemTime::UNIX_EPOCH)
+                                  .unwrap()
+                                  .as_nanos() as i64));
+
+                } else if let Some(mut timerange) = state.logview.get_time_range() {
                     let delta = i.smooth_scroll_delta;
                     if delta.x != 0.0 || delta.y != 0.0 {
                         let zoom = -delta.y as f64 / 100.0;

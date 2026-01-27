@@ -3,7 +3,7 @@ pub mod interface;
 mod log;
 
 pub use log::UpdateWriter;
-pub use log::LogReader;
+pub use log::Log;
 
 use std::collections::VecDeque;
 use std::sync::{mpsc, Arc, Mutex};

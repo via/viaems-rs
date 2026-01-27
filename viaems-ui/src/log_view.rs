@@ -43,7 +43,7 @@ impl Default for ViewerConfig {
                 ViewerPaneConfig {
                     title: "Pane 1".to_owned(),
                     series: vec![ViewerSeriesConfig {
-                        name: "rpm".to_owned(),
+                        name: "position.average_rpm".to_owned(),
                         min: 0.0,
                         max: 7000.0,
                         color: egui::Color32::RED,
@@ -54,13 +54,13 @@ impl Default for ViewerConfig {
                     title: "Pane 2".to_owned(),
                     series: vec![
                         ViewerSeriesConfig {
-                            name: "sensor.map".to_owned(),
+                            name: "sensors.map".to_owned(),
                             min: 0.0,
                             max: 250.0,
                             color: egui::Color32::LIGHT_GREEN,
                         },
                         ViewerSeriesConfig {
-                            name: "sensor.ego".to_owned(),
+                            name: "sensors.ego".to_owned(),
                             min: 0.7,
                             max: 1.4,
                             color: egui::Color32::YELLOW,

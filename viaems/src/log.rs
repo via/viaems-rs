@@ -162,29 +162,25 @@ impl UpdateWriter {
         Ok(())
     }
 
-    pub fn new(filename: &str) -> Result<UpdateWriter> {
-        let (tx, rx) = mpsc::channel::<LogMessage>();
-
-        let conn = duckdb::Connection::open(filename)?;
-        conn.execute("SET autoinstall_known_extensions = false;", [])?;
-        conn.execute("SET autoload_known_extensions = false;", [])?;
-        conn.execute("SET lock_configuration = true;", [])?;
-
+    pub fn new(conn: duckdb::Connection) -> Result<UpdateWriter> {
         UpdateWriter::ensure_columns(&conn)?;
+
+        let (tx, rx) = mpsc::channel::<LogMessage>();
 
         let thr = thread::Builder::new()
             .name("duckdb-update-writer".to_string())
             .spawn(move || {
-                let mut appender = conn.appender("points").unwrap();
                 let mut count = 0;
 
+                let mut appender = conn.appender("points").unwrap();
                 while let Ok(val) = rx.recv() {
                     match val {
                         LogMessage::Update { time, update } => {
                             UpdateWriter::write(&mut appender, time, &update);
                             count += 1;
-                            if count > 10000 {
+                            if count > 2000 {
                                 appender.flush().unwrap();
+                                println!("Wrote 2000");
                                 count = 0;
                             }
                         }
@@ -200,6 +196,7 @@ impl UpdateWriter {
             tx,
             handle: Some(thr),
         })
+
     }
 
     pub fn add(&self, time: SystemTime, update: interface::EngineUpdate) {
@@ -216,13 +213,14 @@ impl UpdateWriter {
             .try_into()
             .unwrap();
 
+        let header = update.header.unwrap_or_default();
         let sensors = update.sensors.unwrap_or_default();
         let position = update.position.unwrap_or_default();
         let calcs = update.calculations.unwrap_or_default();
 
         let params_list = vec![
             duckdb::types::Value::BigInt(epoch_time),
-            duckdb::types::Value::UInt(position.time), // TODO change
+            duckdb::types::Value::UInt(header.timestamp),
             duckdb::types::Value::Float(sensors.map),
             duckdb::types::Value::Float(sensors.iat),
             duckdb::types::Value::Float(sensors.clt),
@@ -291,19 +289,19 @@ impl UpdateWriter {
     }
 }
 
-pub struct LogReader {
+pub struct Log {
     conn: duckdb::Connection,
     filename: String,
 }
 
-impl LogReader {
-    pub fn new(filename: &str) -> LogReader {
+impl Log {
+    pub fn new(filename: &str) -> Log {
         let conf = duckdb::Config::default()
             .max_memory("2GB")
             .unwrap()
             .enable_autoload_extension(false)
             .unwrap()
-            .access_mode(duckdb::AccessMode::ReadOnly)
+            .access_mode(duckdb::AccessMode::ReadWrite)
             .unwrap();
         let conn = duckdb::Connection::open_with_flags(filename, conf).unwrap();
         conn.execute("SET autoinstall_known_extensions = false;", [])
@@ -311,7 +309,7 @@ impl LogReader {
         conn.execute("SET autoload_known_extensions = false;", [])
             .unwrap();
         conn.execute("SET lock_configuration = true;", []).unwrap();
-        LogReader {
+        Log {
             conn,
             filename: filename.to_owned(),
         }
@@ -332,6 +330,17 @@ impl LogReader {
             .collect()
     }
 
+    pub fn get_writer(&self) -> Result<UpdateWriter> {
+        let conn = self.conn.try_clone()?;
+        UpdateWriter::new(conn)
+
+    }
+
+    pub fn try_clone(&self) -> Result<Log> {
+        let conn = self.conn.try_clone()?;
+        Ok(Log { conn, filename: self.filename.clone() })
+    }
+
     fn schema(&self) -> Result<Schema> {
         let mut stmt = self.conn.prepare("DESCRIBE TABLE points;")?;
         let mut builder = SchemaBuilder::new();
@@ -345,6 +354,7 @@ impl LogReader {
                 "BOOLEAN" => datatypes::DataType::Boolean,
                 "BIGINT" => datatypes::DataType::Int64,
                 "UINTEGER" => datatypes::DataType::UInt32,
+                "INTEGER" => datatypes::DataType::Int32,
                 "FLOAT" => datatypes::DataType::Float32,
                 "DOUBLE" => datatypes::DataType::Float64,
                 _ => {
@@ -403,12 +413,14 @@ impl LogReader {
         }
         let projected_schema = SchemaRef::new(full_schema.project(&idxs)?);
         let mut stmt = self.conn.prepare(&query)?;
-        println!("query: {}", query);
         let mut stream = stmt.stream_arrow([], projected_schema)?;
+        let mut count = 0;
 
         while let Some(batch) = stream.next() {
+            count += batch.num_rows();
             f(&batch);
         }
+        //println!("{:?} query: {}, {} rows", stop.duration_since(start).unwrap_or_default(), query, count);
         Ok(())
     }
 

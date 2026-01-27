@@ -136,7 +136,7 @@ pub struct ViewCache {
 
 enum ViewBackendCommand {
     Close,
-    Open(viaems::LogReader),
+    Open(viaems::Log),
     Die,
     SetKeys {
         keys: Vec<String>,
@@ -179,7 +179,7 @@ impl SummaryBuilder {
 struct Backend {
     state: Arc<Mutex<ViewSharedState>>,
     cmd_chan: mpsc::Receiver<ViewBackendCommand>,
-    reader: Option<viaems::LogReader>,
+    reader: Option<viaems::Log>,
 }
 
 impl Backend {
@@ -434,7 +434,6 @@ impl Backend {
 
 impl ViewCache {
     pub fn new() -> ViewCache {
-        // Default to a 20 second empty view
 
         let shared_state = Arc::new(Mutex::new(ViewSharedState {
             status: LoadingStatus::Done,
@@ -563,6 +562,7 @@ impl ViewCache {
             }
 
             // If not currently loading, and we weren't able to fulfill the whole range, issue a load`
+            request_hotcache = true; // TODO hack to see logs until newcache implemented
             if locked.status == LoadingStatus::Done && request_hotcache {
                 self.cmd_chan
                     .send(ViewBackendCommand::SetHotCache {
@@ -599,11 +599,15 @@ impl ViewCache {
         self.state.lock().unwrap().time_range.clone()
     }
 
-    pub fn set_logreader(&mut self, reader: viaems::LogReader) {
+    pub fn add_new_data(&self) {
+
+    }
+
+    pub fn set_logreader(&mut self, reader: viaems::Log) {
         self.keys = vec![
-            "rpm".to_owned(),
-            "sensor.map".to_owned(),
-            "sensor.ego".to_owned(),
+            "position.average_rpm".to_owned(),
+            "sensors.map".to_owned(),
+            "sensors.ego".to_owned(),
         ];
         self.cmd_chan
             .send(ViewBackendCommand::Open(reader))

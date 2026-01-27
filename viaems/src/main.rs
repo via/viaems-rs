@@ -81,7 +81,7 @@ fn main() {
 }
 
 fn read(filename: &str) {
-    let reader = viaems::LogReader::new(filename);
+    let reader = viaems::Log::new(filename);
     let mut count = 0;
     reader
         .query_arrow(
@@ -113,24 +113,17 @@ enum StatusMsg {
 
 fn record(filename: &str, manager: viaems::Manager) {
     let (status_chan_tx, status_chan) = mpsc::channel::<StatusMsg>();
+    let log = viaems::Log::new(filename);
+    let writer = log.get_writer().expect("Unable to open writer");
 
     manager.on_update({
         let status_chan_tx = status_chan_tx.clone();
-        let mut writer: Option<viaems::UpdateWriter> = None;
-        let filename = filename.to_owned();
         let mut total_count = 0;
         let mut this_count = 0;
         let mut time_of_last_msg = Instant::now();
         move |time: SystemTime, update: &interface::EngineUpdate| {
             //println!("{:?}", update);
-            if writer.is_none() {
-                writer = Some(
-                    viaems::UpdateWriter::new(&filename).unwrap()
-                );
-            }
-            if let Some(w) = &mut writer {
-                w.add(time, update.clone());
-            }
+            writer.add(time, update.clone());
             this_count += 1;
             let duration = Instant::now() - time_of_last_msg;
             if duration >= Duration::from_secs(1) {
