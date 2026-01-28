@@ -1,3 +1,5 @@
+
+
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
@@ -477,6 +479,9 @@ impl ViewCache {
         let cache_end_idx = cache.partition_point(|x| x.time.max < times.max);
 
         let width = dest.len();
+        if width == 0 {
+            return;
+        }
         let ns_per_pixel = (times.max - times.min) / width as i64;
 
         for idx in cache_start_idx..cache_end_idx {
@@ -501,6 +506,19 @@ impl ViewCache {
                 }
             }
         }
+    }
+
+    fn get_cache_overlap(range: Range<i64>, key: &str, cache: &HashMap<String, Vec<PointSummary>>) -> Option<Range<i64>> 
+      
+    {
+        let mut result = None;
+        if let Some(series) = cache.get(key) {
+            if let (Some(first), Some(last)) = (series.first(), series.last()) {
+                let cache_range = Range::new(first.time.min, last.time.max);
+                result = range.overlap(&cache_range);
+            }
+        }
+        result
     }
 
     pub fn render(
@@ -530,50 +548,52 @@ impl ViewCache {
             &locked.cache100
         };
 
-        let mut used_from_hotcache: Option<Range<i64>> = None;
 
-        // If we're zoomed in, try to use the hotcache
-        if ns_per_pixel <= 50000000 {
-            let mut request_hotcache = false;
+        // Use the new data cache if we overlap
+        let used_from_newcache: Option<Range<i64>> = Self::get_cache_overlap(times, key, &locked.new_data);
 
-            if let Some(hotcache_series) = locked.hotcache.get(key) {
-                if let (Some(first), Some(last)) = (hotcache_series.first(), hotcache_series.last())
-                {
-                    let hotcache_range = Range::new(first.time.min, last.time.max);
-                    used_from_hotcache = times.overlap(&hotcache_range);
+        let mut remaining_times = times;
 
-                    if let Some(overlap) = used_from_hotcache {
-                        let start_idx = ((overlap.min - times.min) / ns_per_pixel) as usize;
-                        let end_idx = ((overlap.max - times.min) / ns_per_pixel) as usize;
-                        let render_subslice = &mut render.as_mut_slice()[start_idx..end_idx];
-                        Self::render_cache_range(overlap, hotcache_series, render_subslice);
+        if let Some(overlap) = used_from_newcache {
+            let start_idx = ((overlap.min - times.min) / ns_per_pixel) as usize;
+            let end_idx = ((overlap.max - times.min) / ns_per_pixel) as usize;
+            let render_subslice = &mut render.as_mut_slice()[start_idx..end_idx];
+            Self::render_cache_range(overlap, locked.new_data.get(key).unwrap(), render_subslice);
+            remaining_times = Range::new(times.min, overlap.min);
+        }
 
-                        if overlap.min > times.min || overlap.max < times.max {
-                            request_hotcache = true;
-                        }
-                    } else {
-                        request_hotcache = true;
-                    }
-                } else {
-                    request_hotcache = true;
-                }
-            } else {
-                request_hotcache = true;
+
+        // If we're zoomed in, try to use the hotcache (if we have anything left to render)
+        let used_from_hotcache = Self::get_cache_overlap(remaining_times, key, &locked.hotcache);
+        if remaining_times.max != remaining_times.min && ns_per_pixel <= 50000000 {
+            if let Some(overlap) = used_from_hotcache {
+                let start_idx = ((overlap.min - times.min) / ns_per_pixel) as usize;
+                let end_idx = ((overlap.max - times.min) / ns_per_pixel) as usize;
+                let render_subslice = &mut render.as_mut_slice()[start_idx..end_idx];
+                Self::render_cache_range(overlap, locked.hotcache.get(key).unwrap(), render_subslice);
             }
 
+            let request_hotcache = if let Some(overlap) = used_from_hotcache {
+                let fully_overlaps = overlap.min <= remaining_times.min && overlap.max >= remaining_times.max;
+                !fully_overlaps
+            } else {
+                true
+            };
+             
+
             // If not currently loading, and we weren't able to fulfill the whole range, issue a load`
-            request_hotcache = true; // TODO hack to see logs until newcache implemented
             if locked.status == LoadingStatus::Done && request_hotcache {
                 self.cmd_chan
                     .send(ViewBackendCommand::SetHotCache {
                         keys: self.keys.clone(),
-                        range: times,
+                        range: remaining_times,
                     })
                     .unwrap();
             }
         }
 
-        if used_from_hotcache.is_some() {
+        // TODO render from cache the parts we missed
+        if used_from_hotcache.is_some() || used_from_newcache.is_some() {
             return render;
         }
 
@@ -599,8 +619,31 @@ impl ViewCache {
         self.state.lock().unwrap().time_range.clone()
     }
 
-    pub fn add_new_data(&self) {
+    pub fn add_new_data(&self, time: SystemTime, update: &viaems::interface::EngineUpdate) {
+        let mut state = self.state.lock().unwrap();
+        for key in &self.keys {
+            let e = state.new_data.entry(key.to_string()).or_insert(vec![]);
+            let time = time.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as i64;
+            let value = if key == "position.average_rpm" {
+                update.position.unwrap_or_default().average_rpm
+            } else if key == "sensors.map" { 
+                update.sensors.unwrap_or_default().map
+            } else if key == "sensors.ego" { 
+                update.sensors.unwrap_or_default().ego
+            } else {
+                continue
+            };
+            e.push(PointSummary::new(time, value));
 
+            if e.len() > 2 {
+                // TODO improve this, but also move point summaries into decimation cache
+                let midpoint_idx = e.len() / 2;
+                let midpoint_time = e[midpoint_idx].time.max;
+                if time - midpoint_time > 20_000_000_000 {
+                    e.drain(0..midpoint_idx);
+                }
+            }
+        }
     }
 
     pub fn set_logreader(&mut self, reader: viaems::Log) {

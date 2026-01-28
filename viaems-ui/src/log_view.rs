@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::fmt::Pointer;
-use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use chrono::DateTime;
@@ -84,7 +83,7 @@ pub struct LogViewer {
 }
 
 impl LogViewer {
-    pub fn new(cache: Rc<RefCell<view_cache::ViewCache>>) -> LogViewer {
+    pub fn new(cache: Arc<Mutex<view_cache::ViewCache>>) -> LogViewer {
         let mut tiles = egui_tiles::Tiles::default();
         let vertical = tiles.insert_vertical_tile(vec![]);
         let tree = egui_tiles::Tree::new("logview", vertical, tiles);
@@ -150,7 +149,7 @@ impl LogViewer {
 
 struct LogViewerBehavior {
     config: ViewerConfig,
-    cache: Rc<RefCell<view_cache::ViewCache>>,
+    cache: Arc<Mutex<view_cache::ViewCache>>,
 }
 
 impl egui_tiles::Behavior<Pane> for LogViewerBehavior {
@@ -176,7 +175,7 @@ impl egui_tiles::Behavior<Pane> for LogViewerBehavior {
             .iter()
             .find(|x| x.title == pane.name)
             .unwrap();
-        let mut cache = self.cache.borrow_mut();
+        let mut cache = self.cache.lock().unwrap();
         if self.config.time_range.is_none() {
             self.config.time_range = cache.get_log_time_range();
         }

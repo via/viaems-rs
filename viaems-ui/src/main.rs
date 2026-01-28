@@ -21,8 +21,7 @@ struct Application {
     target: Option<viaems::Manager>,
     log: Option<viaems::Log>,
     latest_feed: Arc<Mutex<FeedState>>,
-
-    view: Rc<RefCell<view_cache::ViewCache>>,
+    view: Arc<Mutex<view_cache::ViewCache>>,
     logview: log_view::LogViewer,
     file_dialog: FileDialog,
 
@@ -34,7 +33,7 @@ impl<'a> Application {
         let feed = Arc::new(Mutex::new(FeedState::default()));
         let cwd = std::env::current_dir().ok();
         let dialog = FileDialog::open_file(cwd);
-        let cache = Rc::new(RefCell::new(view_cache::ViewCache::new()));
+        let cache = Arc::new(Mutex::new(view_cache::ViewCache::new()));
 
         Application {
             target: None,
@@ -51,7 +50,7 @@ impl<'a> Application {
         let log = viaems::Log::new(filename);
 
         self.view
-            .borrow_mut()
+            .lock().unwrap()
             .set_logreader(log.try_clone().expect("Unable to create logview reader"));
         self.log = Some(log);
         println!("Opening log");
@@ -88,6 +87,7 @@ impl<'a> Application {
         let target = viaems::Manager::new(conn);
         target.on_update({
             let feed_state = self.latest_feed.clone();
+            let view = self.view.clone();
             let logwriter : Option<viaems::UpdateWriter> = if let Some(reader) = &self.log {
                 Some(reader.get_writer().expect("Unable to create log writer"))
             } else {
@@ -97,6 +97,7 @@ impl<'a> Application {
                 if let Some(w) = &logwriter {
                     w.add(time, update.clone());
                 }
+                view.lock().unwrap().add_new_data(time, update);
                 Application::update_feed(&feed_state, time, update);
             }
         });
@@ -394,21 +395,19 @@ fn main() -> Result<(), eframe::Error> {
                 None => ui.label("Log: Not connected"),
                 Some(log) => {
                     let mut log_str = format!("Log: {}", log.filename());
-                    let viewstat = state.view.borrow().get_status();
-                    match viewstat {
+                    let view = state.view.lock().unwrap();
+                    match view.get_status() {
                         view_cache::LoadingStatus::Done => log_str += " Loaded",
                         view_cache::LoadingStatus::Loading { progress } => {
                             log_str += &format!(" {:.0}%", progress)
                         }
                         view_cache::LoadingStatus::Idle => log_str += " Idle",
                     }
-                    let delta = state
-                        .view
-                        .borrow()
+                    let delta = view
                         .get_log_time_range()
                         .and_then(|r| Some(r.max - r.min))
                         .unwrap_or(0);
-                    let point_count = state.view.borrow().get_point_count();
+                    let point_count = view.get_point_count();
                     ui.label(log_str);
                     ui.label(format!(
                         "View: {} points over {} minutes in {} ms",

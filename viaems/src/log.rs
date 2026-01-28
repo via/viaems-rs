@@ -178,9 +178,8 @@ impl UpdateWriter {
                         LogMessage::Update { time, update } => {
                             UpdateWriter::write(&mut appender, time, &update);
                             count += 1;
-                            if count > 2000 {
+                            if count > 25000 {
                                 appender.flush().unwrap();
-                                println!("Wrote 2000");
                                 count = 0;
                             }
                         }
@@ -341,35 +340,6 @@ impl Log {
         Ok(Log { conn, filename: self.filename.clone() })
     }
 
-    fn schema(&self) -> Result<Schema> {
-        let mut stmt = self.conn.prepare("DESCRIBE TABLE points;")?;
-        let mut builder = SchemaBuilder::new();
-        for result in stmt.query([])?.and_then(|r| -> Result<_> {
-            let col_name: String = r.get("column_name")?;
-            let col_type: String = r.get("column_type")?;
-            Ok((col_name, col_type))
-        }) {
-            let (col_name, col_type) = result?;
-            let schema_type = match col_type.as_str() {
-                "BOOLEAN" => datatypes::DataType::Boolean,
-                "BIGINT" => datatypes::DataType::Int64,
-                "UINTEGER" => datatypes::DataType::UInt32,
-                "INTEGER" => datatypes::DataType::Int32,
-                "FLOAT" => datatypes::DataType::Float32,
-                "DOUBLE" => datatypes::DataType::Float64,
-                _ => {
-                    return Err(Error::FeedKeysMismatch(format!(
-                        "unknown type in log for {}: {}",
-                        col_name, col_type
-                    )));
-                }
-            };
-            builder.push(datatypes::Field::new(col_name, schema_type, true));
-        }
-
-        Ok(builder.finish())
-    }
-
     pub fn query_arrow<F>(
         &self,
         start: SystemTime,
@@ -402,7 +372,11 @@ impl Log {
             start_ns, stop_ns
         );
 
-        let full_schema = self.schema()?;
+        let schema_query = query.clone() + " LIMIT 0";
+        let mut schema_stmt = self.conn.prepare(&schema_query).unwrap();
+        let schema_result = schema_stmt.query_arrow([]).unwrap();
+        let full_schema = schema_result.get_schema();
+
         let mut idxs = vec![0 as usize]; // always include realtime_ns
         for k in keys {
             if let Some(i) = full_schema.fields.iter().position(|f| f.name() == k) {
