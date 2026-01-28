@@ -119,10 +119,10 @@ struct ViewSharedState {
     time_range: Option<Range<i64>>,
 
     // Store un-summarized view of a single time range
-    hotcache: HashMap<String, Vec<PointSummary>>,
+    hotcache: HashMap<String, Vec<Point>>,
 
     // Store un-summarized view of a single time range
-    new_data: HashMap<String, Vec<PointSummary>>,
+    new_data: HashMap<String, Vec<Point>>,
 
     // Store summarized view of entire log
     cache100: HashMap<String, Vec<PointSummary>>,
@@ -253,7 +253,7 @@ impl Backend {
         //
         // But for now, just replace it
 
-        let mut newhotcache = HashMap::<String, Vec<PointSummary>>::new();
+        let mut newhotcache = HashMap::<String, Vec<Point>>::new();
 
         reader
             .query_arrow(start_ns, end_ns, &refkeys, |batch| {
@@ -300,7 +300,7 @@ impl Backend {
                     let ent = newhotcache.entry(col_name.to_owned()).or_insert(Vec::new());
                     for row_idx in 0..batch.num_rows() {
                         let value = values[row_idx];
-                        ent.push(PointSummary::new(times[row_idx], value));
+                        ent.push(Point{time: times[row_idx], value});
                     }
                 }
             })
@@ -470,7 +470,7 @@ impl ViewCache {
         }
     }
 
-    fn render_cache_range(
+    fn render_cache_range_summaries(
         times: Range<i64>,
         cache: &Vec<PointSummary>,
         dest: &mut [Option<PointSummary>],
@@ -482,20 +482,11 @@ impl ViewCache {
         if width == 0 {
             return;
         }
-        let ns_per_pixel = (times.max - times.min) / width as i64;
+        let ns_per_pixel = ((width - 1) as i64 + times.max - times.min) / width as i64;
 
         for idx in cache_start_idx..cache_end_idx {
             let start_pos = ((cache[idx].time.min - times.min) / ns_per_pixel) as usize;
             let end_pos = ((cache[idx].time.max - times.min) / ns_per_pixel) as usize;
-            if end_pos >= width {
-                println!(
-                    "width: {} start_pos: {} end_pos: {}",
-                    width, start_pos, end_pos
-                );
-                continue;
-            }
-            assert!(start_pos <= end_pos);
-            assert!(end_pos < width);
 
             for pos in start_pos..=end_pos {
                 match &mut dest[pos as usize] {
@@ -508,13 +499,38 @@ impl ViewCache {
         }
     }
 
-    fn get_cache_overlap(range: Range<i64>, key: &str, cache: &HashMap<String, Vec<PointSummary>>) -> Option<Range<i64>> 
+    fn render_cache_range_points(
+        times: Range<i64>,
+        cache: &Vec<Point>,
+        dest: &mut [Option<PointSummary>],
+    ) {
+        let cache_start_idx = cache.partition_point(|x| x.time < times.min);
+        let cache_end_idx = cache.partition_point(|x| x.time < times.max);
+
+        let width = dest.len();
+        if width == 0 {
+            return;
+        }
+        let ns_per_pixel = ((width - 1) as i64 + times.max - times.min) / width as i64;
+
+        for idx in cache_start_idx..cache_end_idx {
+            let pos = ((cache[idx].time - times.min) / ns_per_pixel) as usize;
+            match &mut dest[pos as usize] {
+                None => dest[pos as usize] = Some(PointSummary::new(cache[idx].time, cache[idx].value)),
+                Some(x) => {
+                    x.expand_to_include_value(cache[idx].time, cache[idx].value);
+                }
+            }
+        }
+    }
+
+    fn get_cache_overlap_point(range: Range<i64>, key: &str, cache: &HashMap<String, Vec<Point>>) -> Option<Range<i64>> 
       
     {
         let mut result = None;
         if let Some(series) = cache.get(key) {
             if let (Some(first), Some(last)) = (series.first(), series.last()) {
-                let cache_range = Range::new(first.time.min, last.time.max);
+                let cache_range = Range::new(first.time, last.time);
                 result = range.overlap(&cache_range);
             }
         }
@@ -550,7 +566,7 @@ impl ViewCache {
 
 
         // Use the new data cache if we overlap
-        let used_from_newcache: Option<Range<i64>> = Self::get_cache_overlap(times, key, &locked.new_data);
+        let used_from_newcache: Option<Range<i64>> = Self::get_cache_overlap_point(times, key, &locked.new_data);
 
         let mut remaining_times = times;
 
@@ -558,19 +574,19 @@ impl ViewCache {
             let start_idx = ((overlap.min - times.min) / ns_per_pixel) as usize;
             let end_idx = ((overlap.max - times.min) / ns_per_pixel) as usize;
             let render_subslice = &mut render.as_mut_slice()[start_idx..end_idx];
-            Self::render_cache_range(overlap, locked.new_data.get(key).unwrap(), render_subslice);
+            Self::render_cache_range_points(overlap, locked.new_data.get(key).unwrap(), render_subslice);
             remaining_times = Range::new(times.min, overlap.min);
         }
 
 
         // If we're zoomed in, try to use the hotcache (if we have anything left to render)
-        let used_from_hotcache = Self::get_cache_overlap(remaining_times, key, &locked.hotcache);
+        let used_from_hotcache = Self::get_cache_overlap_point(remaining_times, key, &locked.hotcache);
         if remaining_times.max != remaining_times.min && ns_per_pixel <= 50000000 {
             if let Some(overlap) = used_from_hotcache {
                 let start_idx = ((overlap.min - times.min) / ns_per_pixel) as usize;
                 let end_idx = ((overlap.max - times.min) / ns_per_pixel) as usize;
                 let render_subslice = &mut render.as_mut_slice()[start_idx..end_idx];
-                Self::render_cache_range(overlap, locked.hotcache.get(key).unwrap(), render_subslice);
+                Self::render_cache_range_points(overlap, locked.hotcache.get(key).unwrap(), render_subslice);
             }
 
             let request_hotcache = if let Some(overlap) = used_from_hotcache {
@@ -602,7 +618,7 @@ impl ViewCache {
             None => return render,
         };
 
-        Self::render_cache_range(times, cache, render.as_mut_slice());
+        Self::render_cache_range_summaries(times, cache, render.as_mut_slice());
 
         render
     }
@@ -621,9 +637,9 @@ impl ViewCache {
 
     pub fn add_new_data(&self, time: SystemTime, update: &viaems::interface::EngineUpdate) {
         let mut state = self.state.lock().unwrap();
+        let time = time.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as i64;
         for key in &self.keys {
             let e = state.new_data.entry(key.to_string()).or_insert(vec![]);
-            let time = time.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as i64;
             let value = if key == "position.average_rpm" {
                 update.position.unwrap_or_default().average_rpm
             } else if key == "sensors.map" { 
@@ -633,16 +649,22 @@ impl ViewCache {
             } else {
                 continue
             };
-            e.push(PointSummary::new(time, value));
+            e.push(Point{time, value});
 
             if e.len() > 2 {
                 // TODO improve this, but also move point summaries into decimation cache
                 let midpoint_idx = e.len() / 2;
-                let midpoint_time = e[midpoint_idx].time.max;
+                let midpoint_time = e[midpoint_idx].time;
                 if time - midpoint_time > 20_000_000_000 {
                     e.drain(0..midpoint_idx);
                 }
             }
+        }
+        state.point_count += 1;
+        if let Some(range) = &mut state.time_range {
+            range.max = time;
+        } else {
+            state.time_range = Some(Range::new(time, time));
         }
     }
 
