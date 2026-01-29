@@ -564,10 +564,15 @@ impl ViewCache {
             &locked.cache100
         };
 
+        let cache = match main_cache.get(key) {
+            Some(x) => x,
+            None => return render,
+        };
+
+        Self::render_cache_range_summaries(times, cache, render.as_mut_slice());
 
         // Use the new data cache if we overlap
         let used_from_newcache: Option<Range<i64>> = Self::get_cache_overlap_point(times, key, &locked.new_data);
-
         let mut remaining_times = times;
 
         if let Some(overlap) = used_from_newcache {
@@ -608,19 +613,8 @@ impl ViewCache {
             }
         }
 
-        // TODO render from cache the parts we missed
-        if used_from_hotcache.is_some() || used_from_newcache.is_some() {
-            return render;
-        }
-
-        let cache = match main_cache.get(key) {
-            Some(x) => x,
-            None => return render,
-        };
-
-        Self::render_cache_range_summaries(times, cache, render.as_mut_slice());
-
         render
+
     }
 
     pub fn get_status(&self) -> LoadingStatus {

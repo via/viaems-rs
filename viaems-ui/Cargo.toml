@@ -3,8 +3,7 @@ name = "viaems-ui"
 version = "0.1.0"
 authors = [""]
 license = "MIT OR Apache-2.0"
-edition = "2021"
-rust-version = "1.72"
+edition = "2024"
 publish = false
 
 [dependencies]

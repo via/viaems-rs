@@ -26,6 +26,7 @@ struct Application {
     file_dialog: FileDialog,
 
     last_update_time: SystemTime,
+    follow_feed: bool,
 }
 
 impl<'a> Application {
@@ -43,6 +44,7 @@ impl<'a> Application {
             view: cache,
             file_dialog: dialog,
             last_update_time: SystemTime::now(),
+            follow_feed: false,
         }
     }
 
@@ -83,7 +85,7 @@ impl<'a> Application {
     }
 
     fn connect_exec(&mut self) {
-        let conn = connection::Connection::new_exec("/home/via/dev/viaems/obj/hosted/viaems");
+        let conn = connection::Connection::new_exec("/home/via/dev/viaems/obj/hosted/bleh.sh");
         let target = viaems::Manager::new(conn);
         target.on_update({
             let feed_state = self.latest_feed.clone();
@@ -165,7 +167,7 @@ fn main() -> Result<(), eframe::Error> {
             });
         });
         if state.target.is_some() {
-            egui::SidePanel::left("left panel").show(ctx, |ui| {
+            egui::SidePanel::left("left panel").exact_width(250.0).show(ctx, |ui| {
                 ui.label("Live Data");
                 let state = state.latest_feed.lock().unwrap();
                 egui::ScrollArea::vertical().show(ui, |ui| {
@@ -419,9 +421,9 @@ fn main() -> Result<(), eframe::Error> {
             };
         });
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.input(|i| {
+            ui.input_mut(|i| {
                 // TODO this follow mode should be an explicit option in the UI
-                if state.target.is_some() && state.log.is_some() {
+                if state.follow_feed && state.log.is_some() {
                     let now = SystemTime::now();
                     let twentyago = now - Duration::from_secs(20);
                     state.logview.set_time_range(view_cache::Range::new(
@@ -466,8 +468,48 @@ fn main() -> Result<(), eframe::Error> {
 
                     state.logview.set_time_range(timerange);
                 }
+
+                if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                        egui::Modifiers::default(),
+                        egui::Key::F,
+                )) {
+                    state.follow_feed = !state.follow_feed;
+                }
+            });
+            ui.with_layout(egui::Layout::top_down(egui::Align::Max),|ui| {
+                ui.horizontal(|ui| {
+                    if ui.add(egui::Button::new("⛶"))
+                        .on_hover_text("Show entire log")
+                            .clicked() {
+                                if let Some(log) = &state.log && 
+                                   let Some(start) = log.get_earliest_time() && 
+                                   let Some(stop) = log.get_latest_time() {
+
+                                       let range = view_cache::Range::new(
+                                           start.duration_since(SystemTime::UNIX_EPOCH)
+                                           .unwrap()
+                                           .as_nanos() as i64,            
+                                           stop.duration_since(SystemTime::UNIX_EPOCH)
+                                           .unwrap()
+                                           .as_nanos() as i64);
+
+                                       println!("Range: {:?}", range);
+                                       state.logview.set_time_range(range);
+                                       state.follow_feed = false;
+                                }
+                            }
+
+                    let follow_button = egui::Button::new("⏭").selected(state.follow_feed);
+                    if ui.add(follow_button)
+                        .on_hover_text("Update viewer time range for new data automatically")
+                            .clicked() {
+                                state.follow_feed = !state.follow_feed;
+                    }
+                });
             });
             state.logview.ui(ui);
+
+
         });
         ctx.request_repaint();
     })
