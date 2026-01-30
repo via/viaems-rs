@@ -80,7 +80,7 @@ pub struct Point {
 }
 
 /// Stores a single data point that represents a summary of a time range
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct PointSummary {
     /// Time range represented by the point
     pub time: Range<i64>,
@@ -197,22 +197,26 @@ impl Backend {
                 Ok(ViewBackendCommand::Open(r)) => {
                     // Determine overall point count of the file
                     self.set_status(LoadingStatus::Loading { progress: 0.0 });
-                    let earliest = r.get_earliest_time().unwrap();
-                    let latest = r.get_latest_time().unwrap();
-                    let total_count = r.point_count_in_range(earliest, latest).unwrap();
+                    if let Some(earliest) = r.get_earliest_time() &&
+                       let Some(latest) = r.get_latest_time() &&
+                       let Ok(total_count) = r.point_count_in_range(earliest, latest) {
 
-                    let earliest_ns = earliest
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .unwrap()
-                        .as_nanos() as i64;
-                    let latest_ns = latest
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .unwrap()
-                        .as_nanos() as i64;
+                        let earliest_ns = earliest
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap()
+                            .as_nanos() as i64;
+                        let latest_ns = latest
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap()
+                            .as_nanos() as i64;
 
-                    self.state.lock().unwrap().point_count = total_count as usize;
-                    self.state.lock().unwrap().time_range =
-                        Some(Range::new(earliest_ns, latest_ns));
+                        self.state.lock().unwrap().point_count = total_count as usize;
+                        self.state.lock().unwrap().time_range =
+                            Some(Range::new(earliest_ns, latest_ns));
+                    } else {
+                        self.state.lock().unwrap().point_count = 0;
+                        self.state.lock().unwrap().time_range = None;
+                    }
 
                     self.set_status(LoadingStatus::Done);
                     self.reader = Some(r);
@@ -267,6 +271,22 @@ impl Backend {
 
                     let casted;
                     let values = match data.data_type() {
+                        viaems::arrow::datatypes::DataType::Boolean => {
+                            casted =
+                                compute::cast(data, &viaems::arrow::datatypes::DataType::Float32)
+                                    .unwrap();
+                            casted
+                                .as_primitive::<viaems::arrow::datatypes::Float32Type>()
+                                .values()
+                        }
+                        viaems::arrow::datatypes::DataType::Int32 => {
+                            casted =
+                                compute::cast(data, &viaems::arrow::datatypes::DataType::Float32)
+                                    .unwrap();
+                            casted
+                                .as_primitive::<viaems::arrow::datatypes::Float32Type>()
+                                .values()
+                        }
                         viaems::arrow::datatypes::DataType::UInt32 => {
                             casted =
                                 compute::cast(data, &viaems::arrow::datatypes::DataType::Float32)
@@ -353,6 +373,22 @@ impl Backend {
 
                     let casted;
                     let values = match data.data_type() {
+                        viaems::arrow::datatypes::DataType::Boolean => {
+                            casted =
+                                compute::cast(data, &viaems::arrow::datatypes::DataType::Float32)
+                                    .unwrap();
+                            casted
+                                .as_primitive::<viaems::arrow::datatypes::Float32Type>()
+                                .values()
+                        }
+                        viaems::arrow::datatypes::DataType::Int32 => {
+                            casted =
+                                compute::cast(data, &viaems::arrow::datatypes::DataType::Float32)
+                                    .unwrap();
+                            casted
+                                .as_primitive::<viaems::arrow::datatypes::Float32Type>()
+                                .values()
+                        }
                         viaems::arrow::datatypes::DataType::UInt32 => {
                             casted =
                                 compute::cast(data, &viaems::arrow::datatypes::DataType::Float32)
@@ -423,7 +459,7 @@ impl Backend {
                     locked.status = LoadingStatus::Loading { progress };
                 }
             })
-            .unwrap();
+            .ok(); // TODO should we show that we failed?
 
         self.set_status(LoadingStatus::Done);
         let after = SystemTime::now();
@@ -485,8 +521,12 @@ impl ViewCache {
         let ns_per_pixel = ((width - 1) as i64 + times.max - times.min) / width as i64;
 
         for idx in cache_start_idx..cache_end_idx {
-            let start_pos = ((cache[idx].time.min - times.min) / ns_per_pixel) as usize;
-            let end_pos = ((cache[idx].time.max - times.min) / ns_per_pixel) as usize;
+            let start_pos = ((cache[idx].time.min - times.min) / ns_per_pixel) as isize;
+            let end_pos = ((cache[idx].time.max - times.min) / ns_per_pixel) as isize;
+
+            if start_pos < 0 || end_pos < 0 {
+                continue;
+            }
 
             for pos in start_pos..=end_pos {
                 match &mut dest[pos as usize] {
@@ -514,7 +554,10 @@ impl ViewCache {
         let ns_per_pixel = ((width - 1) as i64 + times.max - times.min) / width as i64;
 
         for idx in cache_start_idx..cache_end_idx {
-            let pos = ((cache[idx].time - times.min) / ns_per_pixel) as usize;
+            let pos = ((cache[idx].time - times.min) / ns_per_pixel) as isize;
+            if pos < 0 {
+                continue;
+            }
             match &mut dest[pos as usize] {
                 None => dest[pos as usize] = Some(PointSummary::new(cache[idx].time, cache[idx].value)),
                 Some(x) => {
@@ -659,14 +702,25 @@ impl ViewCache {
     }
 
     pub fn set_logreader(&mut self, reader: viaems::Log) {
-        self.keys = vec![
-            "position.average_rpm".to_owned(),
-            "sensors.map".to_owned(),
-            "sensors.ego".to_owned(),
-        ];
+
+        // Any key not available, discard from cache
+        let available_keys = reader.keys().unwrap_or_default();
+        let new_keys = self.keys.clone()
+                                .into_iter()
+                                .filter(|p| available_keys.contains(p))
+                                .collect();
+
         self.cmd_chan
             .send(ViewBackendCommand::Open(reader))
             .unwrap();
+
+        self.set_keys(&new_keys);
+
+
+    }
+
+    pub fn set_keys(&mut self, keys: &Vec<String>) {
+        self.keys = keys.clone();
         self.cmd_chan
             .send(ViewBackendCommand::SetKeys {
                 keys: self.keys.clone(),

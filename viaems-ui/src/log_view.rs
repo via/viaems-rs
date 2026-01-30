@@ -17,6 +17,7 @@ use egui_tiles;
 #[derive(Clone)]
 pub struct ViewerSeriesConfig {
     name: String,
+    enabled: bool,
     min: f32,
     max: f32,
     color: egui::Color32,
@@ -26,7 +27,6 @@ pub struct ViewerSeriesConfig {
 pub struct ViewerPaneConfig {
     title: String,
     series: Vec<ViewerSeriesConfig>,
-    locked: bool,
 }
 // Toplevel config for the log viewer
 pub struct ViewerConfig {
@@ -43,29 +43,30 @@ impl Default for ViewerConfig {
                     title: "Pane 1".to_owned(),
                     series: vec![ViewerSeriesConfig {
                         name: "position.average_rpm".to_owned(),
+                        enabled: true,
                         min: 0.0,
                         max: 7000.0,
                         color: egui::Color32::RED,
                     }],
-                    locked: true,
                 },
                 ViewerPaneConfig {
                     title: "Pane 2".to_owned(),
                     series: vec![
                         ViewerSeriesConfig {
                             name: "sensors.map".to_owned(),
+                            enabled: true,
                             min: 0.0,
                             max: 250.0,
                             color: egui::Color32::LIGHT_GREEN,
                         },
                         ViewerSeriesConfig {
                             name: "sensors.ego".to_owned(),
+                            enabled: true,
                             min: 0.7,
                             max: 1.4,
                             color: egui::Color32::YELLOW,
                         },
                     ],
-                    locked: true,
                 },
             ],
             time_range: None,
@@ -111,8 +112,56 @@ impl LogViewer {
         result
     }
 
+    pub fn set_available_keys(&mut self, keys: &Vec<String>) {
+        self.behavior.config = ViewerConfig::default();
+
+        // First, add any new keys as disabled default ones
+        for key in keys.iter() {
+            for pane in &mut self.behavior.config.panes {
+                if pane.series.iter().find(|s| s.name == *key).is_none() {
+                    pane.series.push(ViewerSeriesConfig {
+                        name: key.to_owned(),
+                        enabled: false,
+                        min: 0.0,
+                        max: 100.0,
+                        color: egui::Color32::WHITE,
+                    });
+                }
+            }
+        }
+
+        // Then remove any series for keys we don't have
+        for pane in &mut self.behavior.config.panes {
+            pane.series.retain(|s| keys.contains(&s.name));
+        }
+
+        self.behavior.cache.lock().unwrap().set_keys(&self.current_keys());
+
+    }
+
+    fn current_keys(&self) -> Vec<String> {
+        let mut result = vec![];
+        for pane in &self.behavior.config.panes {
+            for series in &pane.series {
+                if !series.enabled {
+                    continue;
+                }
+                if !result.contains(&series.name) {
+                    result.push(series.name.clone());
+                }
+            }
+        }
+        result
+    }
+
+
+
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        let before_keys = self.current_keys();
         self.tree.ui(&mut self.behavior, ui);
+        if self.current_keys() != before_keys {
+            self.behavior.cache.lock().unwrap().set_keys(&self.current_keys());
+        }
 
         if let Some(range) = &self.behavior.config.time_range {
             let start_ns = range.min;
@@ -172,7 +221,7 @@ impl egui_tiles::Behavior<Pane> for LogViewerBehavior {
         let config = self
             .config
             .panes
-            .iter()
+            .iter_mut()
             .find(|x| x.title == pane.name)
             .unwrap();
         let mut cache = self.cache.lock().unwrap();
@@ -182,7 +231,33 @@ impl egui_tiles::Behavior<Pane> for LogViewerBehavior {
 
         let drawrect = ui.max_rect();
 
+        ui.menu_button("⚙", |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                egui::CollapsingHeader::new("Series").default_open(true).show(ui, |ui| {
+                    egui::Grid::new("series")
+                        .num_columns(4)
+                        .striped(true)
+                        .show(ui, |ui| {
+                            for series in &mut config.series {
+                                let mut min = series.min.to_string();
+                                let mut max = series.max.to_string();
+                                ui.checkbox(&mut series.enabled, series.name.clone());
+                                ui.text_edit_singleline(&mut min);
+                                ui.text_edit_singleline(&mut max);
+                                ui.color_edit_button_srgba(&mut series.color);
+                                series.min = min.parse().unwrap_or_default();
+                                series.max = max.parse().unwrap_or_default();
+                                ui.end_row();
+                            }
+                        });
+                });
+            });
+        });
+
         for series in &config.series {
+            if !series.enabled {
+                continue;
+            }
             let stroke = egui::Stroke::new(1.0, series.color);
 
             if let Some(range) = self.config.time_range {
@@ -236,6 +311,7 @@ impl egui_tiles::Behavior<Pane> for LogViewerBehavior {
                 ));
             }
         }
+
 
         egui_tiles::UiResponse::None
     }

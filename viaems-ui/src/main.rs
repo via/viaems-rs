@@ -21,7 +21,7 @@ struct Application {
     target: Option<viaems::Manager>,
     log: Option<viaems::Log>,
     latest_feed: Arc<Mutex<FeedState>>,
-    view: Arc<Mutex<view_cache::ViewCache>>,
+    view_cache: Arc<Mutex<view_cache::ViewCache>>,
     logview: log_view::LogViewer,
     file_dialog: FileDialog,
 
@@ -41,7 +41,7 @@ impl<'a> Application {
             log: None,
             latest_feed: feed,
             logview: log_view::LogViewer::new(cache.clone()),
-            view: cache,
+            view_cache: cache,
             file_dialog: dialog,
             last_update_time: SystemTime::now(),
             follow_feed: false,
@@ -51,9 +51,10 @@ impl<'a> Application {
     fn open_log(&mut self, filename: &str) {
         let log = viaems::Log::new(filename);
 
-        self.view
+        self.view_cache
             .lock().unwrap()
             .set_logreader(log.try_clone().expect("Unable to create logview reader"));
+        self.logview.set_available_keys(&log.keys().unwrap_or_default());
         self.log = Some(log);
         println!("Opening log");
     }
@@ -89,7 +90,7 @@ impl<'a> Application {
         let target = viaems::Manager::new(conn);
         target.on_update({
             let feed_state = self.latest_feed.clone();
-            let view = self.view.clone();
+            let view = self.view_cache.clone();
             let logwriter : Option<viaems::UpdateWriter> = if let Some(reader) = &self.log {
                 Some(reader.get_writer().expect("Unable to create log writer"))
             } else {
@@ -167,7 +168,7 @@ fn main() -> Result<(), eframe::Error> {
             });
         });
         if state.target.is_some() {
-            egui::SidePanel::left("left panel").exact_width(250.0).show(ctx, |ui| {
+            egui::SidePanel::left("left panel").show(ctx, |ui| {
                 ui.label("Live Data");
                 let state = state.latest_feed.lock().unwrap();
                 egui::ScrollArea::vertical().show(ui, |ui| {
@@ -345,7 +346,7 @@ fn main() -> Result<(), eframe::Error> {
 
                                 ui.label("RPM Limiter");
                                 if calcs.rpm_limit_cut {
-                                    ui.label(egui::RichText::new("ON").color(egui::Color32::GREEN));
+                                    ui.label(egui::RichText::new("ON").color(egui::Color32::RED));
                                 } else {
                                     ui.label(egui::RichText::new("OFF").color(egui::Color32::GREEN));
                                 }
@@ -353,7 +354,7 @@ fn main() -> Result<(), eframe::Error> {
 
                                 ui.label("Boost Limiter");
                                 if calcs.boost_cut {
-                                    ui.label(egui::RichText::new("ON").color(egui::Color32::GREEN));
+                                    ui.label(egui::RichText::new("ON").color(egui::Color32::RED));
                                 } else {
                                     ui.label(egui::RichText::new("OFF").color(egui::Color32::GREEN));
                                 }
@@ -361,7 +362,7 @@ fn main() -> Result<(), eframe::Error> {
 
                                 ui.label("Fuel Limiter");
                                 if calcs.fuel_overduty_cut {
-                                    ui.label(egui::RichText::new("ON").color(egui::Color32::GREEN));
+                                    ui.label(egui::RichText::new("ON").color(egui::Color32::RED));
                                 } else {
                                     ui.label(egui::RichText::new("OFF").color(egui::Color32::GREEN));
                                 }
@@ -369,7 +370,7 @@ fn main() -> Result<(), eframe::Error> {
 
                                 ui.label("Dwell Limiter");
                                 if calcs.dwell_overduty_cut {
-                                    ui.label(egui::RichText::new("ON").color(egui::Color32::GREEN));
+                                    ui.label(egui::RichText::new("ON").color(egui::Color32::RED));
                                 } else {
                                     ui.label(egui::RichText::new("OFF").color(egui::Color32::GREEN));
                                 }
@@ -397,7 +398,7 @@ fn main() -> Result<(), eframe::Error> {
                 None => ui.label("Log: Not connected"),
                 Some(log) => {
                     let mut log_str = format!("Log: {}", log.filename());
-                    let view = state.view.lock().unwrap();
+                    let view = state.view_cache.lock().unwrap();
                     match view.get_status() {
                         view_cache::LoadingStatus::Done => log_str += " Loaded",
                         view_cache::LoadingStatus::Loading { progress } => {

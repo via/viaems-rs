@@ -190,15 +190,13 @@ impl Log {
         &self.filename
     }
 
-    pub fn keys(&self) -> Vec<String> {
-        self.conn
-            .prepare("DESCRIBE TABLE points;")
-            .unwrap()
-            .query_map([], |row| row.get::<_, String>("column_name"))
-            .unwrap()
+    pub fn keys(&self) -> Option<Vec<String>> {
+        Some(self.conn
+            .prepare("DESCRIBE TABLE points;").ok()?
+            .query_map([], |row| row.get::<_, String>("column_name")).ok()?
             .flatten()
             .skip(1)
-            .collect()
+            .collect())
     }
 
     pub fn get_writer(&self) -> Result<UpdateWriter> {
@@ -245,8 +243,8 @@ impl Log {
         );
 
         let schema_query = query.clone() + " LIMIT 0";
-        let mut schema_stmt = self.conn.prepare(&schema_query).unwrap();
-        let schema_result = schema_stmt.query_arrow([]).unwrap();
+        let mut schema_stmt = self.conn.prepare(&schema_query)?;
+        let schema_result = schema_stmt.query_arrow([])?;
         let full_schema = schema_result.get_schema();
 
         let mut idxs = vec![0 as usize]; // always include realtime_ns
@@ -288,14 +286,13 @@ impl Log {
         Ok(result)
     }
 
-    // TODO Learn out how to use ? shorthand to get rid of the unwraps
     pub fn get_earliest_time(&self) -> Option<SystemTime> {
         let query = "SELECT realtime_ns from points order by realtime_ns asc limit 1";
-        let mut stmt = self.conn.prepare(query).unwrap();
-        if let Ok(Some(r)) = stmt.query([]).unwrap().next() {
-            let time_ns = r.get::<_, i64>(0).unwrap();
-            let duration = Duration::from_nanos(time_ns.try_into().unwrap());
-            let time = SystemTime::UNIX_EPOCH.checked_add(duration).unwrap();
+        let mut stmt = self.conn.prepare(query).ok()?;
+        if let Ok(Some(r)) = stmt.query([]).ok()?.next() {
+            let time_ns = r.get::<_, i64>(0).ok()?;
+            let duration = Duration::from_nanos(time_ns.try_into().ok()?);
+            let time = SystemTime::UNIX_EPOCH.checked_add(duration)?;
             return Some(time);
         } else {
             return None;
@@ -304,11 +301,11 @@ impl Log {
 
     pub fn get_latest_time(&self) -> Option<SystemTime> {
         let query = "SELECT realtime_ns from points order by realtime_ns desc limit 1";
-        let mut stmt = self.conn.prepare(query).unwrap();
-        if let Ok(Some(r)) = stmt.query([]).unwrap().next() {
-            let time_ns = r.get::<_, i64>(0).unwrap();
-            let duration = Duration::from_nanos(time_ns.try_into().unwrap());
-            let time = SystemTime::UNIX_EPOCH.checked_add(duration).unwrap();
+        let mut stmt = self.conn.prepare(query).ok()?;
+        if let Ok(Some(r)) = stmt.query([]).ok()?.next() {
+            let time_ns = r.get::<_, i64>(0).ok()?;
+            let duration = Duration::from_nanos(time_ns.try_into().ok()?);
+            let time = SystemTime::UNIX_EPOCH.checked_add(duration)?;
             return Some(time);
         } else {
             return None;
