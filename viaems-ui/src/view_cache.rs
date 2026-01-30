@@ -634,14 +634,10 @@ impl ViewCache {
         let time = time.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as i64;
         for key in &self.keys {
             let e = state.new_data.entry(key.to_string()).or_insert(vec![]);
-            let value = if key == "position.average_rpm" {
-                update.position.unwrap_or_default().average_rpm
-            } else if key == "sensors.map" { 
-                update.sensors.unwrap_or_default().map
-            } else if key == "sensors.ego" { 
-                update.sensors.unwrap_or_default().ego
+            let value = if let Some(v) = <viaems::interface::EngineUpdate as viaems::interface::LoggableMessage>::get_f32_value_by_name(update, key) { 
+                v
             } else {
-                continue
+                continue;
             };
             e.push(Point{time, value});
 

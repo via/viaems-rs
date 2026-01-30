@@ -39,6 +39,18 @@ pub fn make_loggable(input: TokenStream) -> TokenStream {
             }
     });
 
+    let f32getters = fields.into_iter()
+        .map(|f| {
+            let field_name_str = f.ident.as_ref().unwrap().to_string();
+            let field_name = f.ident.as_ref().unwrap();
+            let ft = &f.ty;
+            quote! {
+                if field == #field_name_str {
+                    return <#ft as crate::interface::LoggableMessage>::get_f32_value_by_name(&self.#field_name, rest);
+                }
+            }
+    });
+
     let expanded = quote! {
         impl crate::interface::LoggableMessage for #struct_name {
             fn get_loggable_fields(prefix: &str) -> Vec<crate::interface::LoggableField> {
@@ -59,8 +71,24 @@ pub fn make_loggable(input: TokenStream) -> TokenStream {
                 result
             }
 
+            fn get_f32_value_by_name(&self, name: &str) -> Option<f32> {
+                let parts = name.split_once(".");
+
+                let (field, rest) = if let Some((f, r)) = parts {
+                    (f, r)
+                } else {
+                    (name, "")
+                };
+
+                #(#f32getters)
+                *
+                
+                None
+            }
+
         }
     };
+    println!("{}", expanded);
     proc_macro::TokenStream::from(expanded)
 }
 

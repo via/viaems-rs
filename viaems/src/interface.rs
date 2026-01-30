@@ -9,6 +9,7 @@ pub struct LoggableField {
 pub trait LoggableMessage {
     fn get_loggable_fields(prefix: &str) -> Vec<LoggableField>;
     fn get_duckdb_value_list(&self) -> Vec<duckdb::types::Value>;
+    fn get_f32_value_by_name(&self, name: &str) -> Option<f32>;
 }
 
 impl LoggableMessage for i32 {
@@ -17,6 +18,9 @@ impl LoggableMessage for i32 {
     }
     fn get_duckdb_value_list(&self) -> Vec<duckdb::types::Value> {
       vec![duckdb::types::Value::Int(*self)]
+    }
+    fn get_f32_value_by_name(&self, name: &str) -> Option<f32> {
+        Some(*self as f32)
     }
 }
 
@@ -27,6 +31,9 @@ impl LoggableMessage for f32 {
     fn get_duckdb_value_list(&self) -> Vec<duckdb::types::Value> {
       vec![duckdb::types::Value::Float(*self)]
     }
+    fn get_f32_value_by_name(&self, name: &str) -> Option<f32> {
+        Some(*self)
+    }
 }
 
 impl LoggableMessage for bool {
@@ -35,6 +42,9 @@ impl LoggableMessage for bool {
     }
     fn get_duckdb_value_list(&self) -> Vec<duckdb::types::Value> {
       vec![duckdb::types::Value::Boolean(*self)]
+    }
+    fn get_f32_value_by_name(&self, name: &str) -> Option<f32> {
+        Some(if *self {1.0} else {0.0})
     }
 }
 
@@ -45,6 +55,9 @@ impl LoggableMessage for u32 {
     fn get_duckdb_value_list(&self) -> Vec<duckdb::types::Value> {
       vec![duckdb::types::Value::UInt(*self)]
     }
+    fn get_f32_value_by_name(&self, name: &str) -> Option<f32> {
+        Some(*self as f32)
+    }
 }
 
 impl LoggableMessage for i64 {
@@ -53,6 +66,9 @@ impl LoggableMessage for i64 {
     }
     fn get_duckdb_value_list(&self) -> Vec<duckdb::types::Value> {
       vec![duckdb::types::Value::BigInt(*self)]
+    }
+    fn get_f32_value_by_name(&self, name: &str) -> Option<f32> {
+        Some(*self as f32)
     }
 }
 
@@ -64,6 +80,9 @@ where T: LoggableMessage + Default + Copy {
     }
     fn get_duckdb_value_list(&self) -> Vec<duckdb::types::Value> {
       <T as LoggableMessage>::get_duckdb_value_list(&self.unwrap_or_default())
+    }
+    fn get_f32_value_by_name(&self, name: &str) -> Option<f32> {
+        <T as LoggableMessage>::get_f32_value_by_name(&self.unwrap_or_default(), name)
     }
 }
 
