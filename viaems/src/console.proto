@@ -414,5 +414,3 @@ message Message {
     Response response = 5;
   }
 }
-
-

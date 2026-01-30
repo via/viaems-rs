@@ -4,7 +4,7 @@ members = [
   "viaems",
   "viaems-ui",
   "viaems-firmware"
-]
+, "viaems-interface-derive"]
 
 
 [profile.dev]

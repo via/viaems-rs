@@ -4,8 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+viaems-interface-derive = { path = "../viaems-interface-derive" }
 clap = { version = "4.4", features = ["derive"] }
-duckdb = { version = "1.4", features = ["bundled"] }
+duckdb = { version = "1.4", features = [] }
 ctrlc = "3.4"
 rusb = "0.9.3"
 rusb-async = "0.0.1-alpha"

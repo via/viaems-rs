@@ -61,74 +61,13 @@ impl Drop for UpdateWriter {
     }
 }
 
-const TABLE_SCHEMA : &'static [(&str, &str)] = &[
-    ("realtime_ns", "BIGINT"),
-    ("cputime", "UINTEGER"),
-    ("sensors.map", "FLOAT"),
-    ("sensors.iat", "FLOAT"),
-    ("sensors.clt", "FLOAT"),
-    ("sensors.brv", "FLOAT"),
-    ("sensors.tps", "FLOAT"),
-    ("sensors.aap", "FLOAT"),
-    ("sensors.frt", "FLOAT"),
-    ("sensors.ego", "FLOAT"),
-    ("sensors.frp", "FLOAT"),
-    ("sensors.eth", "FLOAT"),
-    ("sensors.knock1", "FLOAT"),
-    ("sensors.knock2", "FLOAT"),
-
-    ("sensors.map_fault", "INTEGER"),
-    ("sensors.iat_fault", "INTEGER"),
-    ("sensors.clt_fault", "INTEGER"),
-    ("sensors.brv_fault", "INTEGER"),
-    ("sensors.tps_fault", "INTEGER"),
-    ("sensors.aap_fault", "INTEGER"),
-    ("sensors.frt_fault", "INTEGER"),
-    ("sensors.ego_fault", "INTEGER"),
-    ("sensors.frp_fault", "INTEGER"),
-    ("sensors.eth_fault", "INTEGER"),
-
-    ("sensors.map_rate", "FLOAT"),
-    ("sensors.iat_rate", "FLOAT"),
-    ("sensors.clt_rate", "FLOAT"),
-    ("sensors.brv_rate", "FLOAT"),
-    ("sensors.tps_rate", "FLOAT"),
-    ("sensors.aap_rate", "FLOAT"),
-    ("sensors.frt_rate", "FLOAT"),
-    ("sensors.ego_rate", "FLOAT"),
-    ("sensors.frp_rate", "FLOAT"),
-    ("sensors.eth_rate", "FLOAT"),
-
-    ("position.time", "UINTEGER"),
-    ("position.valid_before_timestamp", "UINTEGER"),
-    ("position.has_position", "BOOLEAN"),
-    ("position.synced", "BOOLEAN"),
-    ("position.loss_cause", "INTEGER"),
-    ("position.last_angle", "FLOAT"),
-    ("position.instantaneous_rpm", "FLOAT"),
-    ("position.average_rpm", "FLOAT"),
-
-    ("calculations.advance", "FLOAT"),
-    ("calculations.dwell_us", "FLOAT"),
-    ("calculations.fuel_us", "FLOAT"),
-    ("calculations.airmass_per_cycle", "FLOAT"),
-    ("calculations.fuelvol_per_cycle", "FLOAT"),
-    ("calculations.tipin_percent", "FLOAT"),
-    ("calculations.injector_dead_time", "FLOAT"),
-    ("calculations.pulse_width_correction", "FLOAT"),
-    ("calculations.lambda", "FLOAT"),
-    ("calculations.ve", "FLOAT"),
-    ("calculations.engine_temp_enrichment", "FLOAT"),
-
-    ("calculations.rpm_limit_cut", "BOOLEAN"),
-    ("calculations.boost_cut", "BOOLEAN"),
-    ("calculations.fuel_overduty_cut", "BOOLEAN"),
-    ("calculations.dwell_overduty_cut", "BOOLEAN"),
-];
-
 impl UpdateWriter {
     fn ensure_columns(conn: &duckdb::Connection) -> Result<()> {
         let mut existing_columns = HashMap::new();
+        let mut message_fields = <i64 as interface::LoggableMessage>::get_loggable_fields("realtime_ns");
+        message_fields.append(&mut <interface::EngineUpdate as interface::LoggableMessage>::get_loggable_fields(""));
+        let message_fields = message_fields;
+
         if let Ok(stmt) = &mut conn.prepare("DESCRIBE TABLE points;") {
             for result in stmt.query([])?.and_then(|r| -> Result<_> {
                 let col_name: String = r.get("column_name")?;
@@ -139,10 +78,10 @@ impl UpdateWriter {
                 existing_columns.entry(n).or_insert(t);
             }
 
-            for (col_name, col_type) in TABLE_SCHEMA {
-                if let Some(existing_type) = existing_columns.get(*col_name) {
-                    if existing_type != col_type {
-                    return Err(Error::FeedKeysMismatch(col_name.to_string()));
+            for interface::LoggableField{field_name, field_duckdb_typename} in &message_fields {
+                if let Some(existing_type) = existing_columns.get(field_name) {
+                    if existing_type != field_duckdb_typename {
+                    return Err(Error::FeedKeysMismatch(field_name.to_string()));
                     }
                 } else {
                     // TODO add the column
@@ -151,8 +90,8 @@ impl UpdateWriter {
         } else {
             // Table did not exist or new database, go ahead and create points
             let mut query = "CREATE TABLE points (".to_owned();
-            for (new_key, new_type) in TABLE_SCHEMA {
-                query += &format!("\"{}\" {}, ", new_key, new_type);
+            for interface::LoggableField{field_name, field_duckdb_typename} in &message_fields {
+                query += &format!("\"{}\" {}, ", field_name, field_duckdb_typename);
             }
 
             query += ");";
@@ -212,75 +151,8 @@ impl UpdateWriter {
             .try_into()
             .unwrap();
 
-        let header = update.header.unwrap_or_default();
-        let sensors = update.sensors.unwrap_or_default();
-        let position = update.position.unwrap_or_default();
-        let calcs = update.calculations.unwrap_or_default();
-
-        let params_list = vec![
-            duckdb::types::Value::BigInt(epoch_time),
-            duckdb::types::Value::UInt(header.timestamp),
-            duckdb::types::Value::Float(sensors.map),
-            duckdb::types::Value::Float(sensors.iat),
-            duckdb::types::Value::Float(sensors.clt),
-            duckdb::types::Value::Float(sensors.brv),
-            duckdb::types::Value::Float(sensors.tps),
-            duckdb::types::Value::Float(sensors.aap),
-            duckdb::types::Value::Float(sensors.frt),
-            duckdb::types::Value::Float(sensors.ego),
-            duckdb::types::Value::Float(sensors.frp),
-            duckdb::types::Value::Float(sensors.eth),
-            duckdb::types::Value::Float(sensors.knock1),
-            duckdb::types::Value::Float(sensors.knock2),
-
-            duckdb::types::Value::Int(sensors.map_fault),
-            duckdb::types::Value::Int(sensors.iat_fault),
-            duckdb::types::Value::Int(sensors.clt_fault),
-            duckdb::types::Value::Int(sensors.brv_fault),
-            duckdb::types::Value::Int(sensors.tps_fault),
-            duckdb::types::Value::Int(sensors.aap_fault),
-            duckdb::types::Value::Int(sensors.frt_fault),
-            duckdb::types::Value::Int(sensors.ego_fault),
-            duckdb::types::Value::Int(sensors.frp_fault),
-            duckdb::types::Value::Int(sensors.eth_fault),
-
-            duckdb::types::Value::Float(sensors.map_rate),
-            duckdb::types::Value::Float(sensors.iat_rate),
-            duckdb::types::Value::Float(sensors.clt_rate),
-            duckdb::types::Value::Float(sensors.brv_rate),
-            duckdb::types::Value::Float(sensors.tps_rate),
-            duckdb::types::Value::Float(sensors.aap_rate),
-            duckdb::types::Value::Float(sensors.frt_rate),
-            duckdb::types::Value::Float(sensors.ego_rate),
-            duckdb::types::Value::Float(sensors.frp_rate),
-            duckdb::types::Value::Float(sensors.eth_rate),
-
-            duckdb::types::Value::UInt(position.time),
-            duckdb::types::Value::UInt(position.valid_before_timestamp),
-            duckdb::types::Value::Boolean(position.has_position),
-            duckdb::types::Value::Boolean(position.synced),
-            duckdb::types::Value::Int(position.loss_cause),
-            duckdb::types::Value::Float(position.last_angle),
-            duckdb::types::Value::Float(position.instantaneous_rpm),
-            duckdb::types::Value::Float(position.average_rpm),
-
-            duckdb::types::Value::Float(calcs.advance),
-            duckdb::types::Value::Float(calcs.dwell_us),
-            duckdb::types::Value::Float(calcs.fuel_us),
-            duckdb::types::Value::Float(calcs.airmass_per_cycle),
-            duckdb::types::Value::Float(calcs.fuelvol_per_cycle),
-            duckdb::types::Value::Float(calcs.tipin_percent),
-            duckdb::types::Value::Float(calcs.injector_dead_time),
-            duckdb::types::Value::Float(calcs.pulse_width_correction),
-            duckdb::types::Value::Float(calcs.lambda),
-            duckdb::types::Value::Float(calcs.ve),
-            duckdb::types::Value::Float(calcs.engine_temp_enrichment),
-
-            duckdb::types::Value::Boolean(calcs.rpm_limit_cut),
-            duckdb::types::Value::Boolean(calcs.boost_cut),
-            duckdb::types::Value::Boolean(calcs.fuel_overduty_cut),
-            duckdb::types::Value::Boolean(calcs.dwell_overduty_cut),
-        ];
+        let mut params_list = interface::LoggableMessage::get_duckdb_value_list(&epoch_time);
+        params_list.append(&mut interface::LoggableMessage::get_duckdb_value_list(update));
 
         appender
             .append_row(duckdb::appender_params_from_iter(params_list))
