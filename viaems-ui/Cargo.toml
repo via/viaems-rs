@@ -7,12 +7,12 @@ edition = "2024"
 publish = false
 
 [dependencies]
-egui = "0.31"
-eframe = { version = "0.31", features=["wgpu", "wayland"]}
-emath = { version = "0.31" }
-epaint = "0.31"
-egui_file = "0.22"
-egui_tiles = "*"
+egui = "0.33"
+eframe = { version = "0.33", features=["wgpu", "wayland"]}
+emath = { version = "0.33" }
+epaint = "0.33"
+egui_file = "0.25"
+egui_tiles = "0.14"
 clap = { version = "4.4.12", features = ["derive"] }
 
 viaems = { path = "../viaems" }

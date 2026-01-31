@@ -32,8 +32,7 @@ struct Application {
 impl<'a> Application {
     fn new() -> Application {
         let feed = Arc::new(Mutex::new(FeedState::default()));
-        let cwd = std::env::current_dir().ok();
-        let dialog = FileDialog::open_file(cwd);
+        let dialog = FileDialog::open_file();
         let cache = Arc::new(Mutex::new(view_cache::ViewCache::new()));
 
         Application {
@@ -168,7 +167,9 @@ fn main() -> Result<(), eframe::Error> {
             });
         });
         if state.target.is_some() {
-            egui::SidePanel::left("left panel").show(ctx, |ui| {
+            egui::SidePanel::left("left panel")
+                .min_width(250.0)
+                .show(ctx, |ui| {
                 ui.label("Live Data");
                 let state = state.latest_feed.lock().unwrap();
                 egui::ScrollArea::vertical().show(ui, |ui| {
@@ -196,62 +197,62 @@ fn main() -> Result<(), eframe::Error> {
                                 ui.end_row();
 
                                 ui.label("MAP");
-                                ui.label(sensors.map.to_string());
-                                ui.label(sensors.map_rate.to_string());
+                                ui.label(format!("{:.1}", sensors.map));
+                                ui.label(format!("{:.1}", sensors.map_rate));
                                 render_fault(ui, sensors.map_fault());
                                 ui.end_row();
 
                                 ui.label("IAT");
-                                ui.label(sensors.iat.to_string());
-                                ui.label(sensors.iat_rate.to_string());
+                                ui.label(format!("{:.1}", sensors.iat));
+                                ui.label(format!("{:.1}", sensors.iat_rate));
                                 render_fault(ui, sensors.iat_fault());
                                 ui.end_row();
 
                                 ui.label("CLT");
-                                ui.label(sensors.clt.to_string());
-                                ui.label(sensors.clt_rate.to_string());
+                                ui.label(format!("{:.1}", sensors.clt));
+                                ui.label(format!("{:.1}", sensors.clt_rate));
                                 render_fault(ui, sensors.clt_fault());
                                 ui.end_row();
 
                                 ui.label("BRV");
-                                ui.label(sensors.brv.to_string());
-                                ui.label(sensors.brv_rate.to_string());
+                                ui.label(format!("{:.1}", sensors.brv));
+                                ui.label(format!("{:.1}", sensors.brv_rate));
                                 render_fault(ui, sensors.brv_fault());
                                 ui.end_row();
 
                                 ui.label("TPS");
-                                ui.label(sensors.tps.to_string());
-                                ui.label(sensors.tps_rate.to_string());
+                                ui.label(format!("{:.1}", sensors.tps));
+                                ui.label(format!("{:.1}", sensors.tps_rate));
                                 render_fault(ui, sensors.tps_fault());
                                 ui.end_row();
 
                                 ui.label("AAP");
-                                ui.label(sensors.aap.to_string());
-                                ui.label(sensors.aap_rate.to_string());
+                                ui.label(format!("{:.1}", sensors.aap));
+                                ui.label(format!("{:.1}", sensors.aap_rate));
                                 render_fault(ui, sensors.aap_fault());
                                 ui.end_row();
 
                                 ui.label("FRT");
-                                ui.label(sensors.frt.to_string());
-                                ui.label(sensors.frt_rate.to_string());
+                                ui.label(format!("{:.1}", sensors.frt));
+                                ui.label(format!("{:.1}", sensors.frt_rate));
                                 render_fault(ui, sensors.frt_fault());
                                 ui.end_row();
 
                                 ui.label("EGO");
-                                ui.label(sensors.ego.to_string());
-                                ui.label(sensors.ego_rate.to_string());
+                                ui.label(format!("{:.1}", sensors.ego));
+                                ui.label(format!("{:.1}", sensors.ego_rate));
                                 render_fault(ui, sensors.ego_fault());
                                 ui.end_row();
 
                                 ui.label("FRP");
-                                ui.label(sensors.frp.to_string());
-                                ui.label(sensors.frp_rate.to_string());
+                                ui.label(format!("{:.1}", sensors.frp));
+                                ui.label(format!("{:.1}", sensors.frp_rate));
                                 render_fault(ui, sensors.frp_fault());
                                 ui.end_row();
 
                                 ui.label("ETH");
-                                ui.label(sensors.eth.to_string());
-                                ui.label(sensors.eth_rate.to_string());
+                                ui.label(format!("{:.1}", sensors.eth));
+                                ui.label(format!("{:.1}", sensors.eth_rate));
                                 render_fault(ui, sensors.eth_fault());
                                 ui.end_row();
 
@@ -281,8 +282,11 @@ fn main() -> Result<(), eframe::Error> {
                                 ui.end_row();
 
                                 if !position.synced {
-                                    ui.label("Sync Loss Reason");
-                                    ui.label(position.loss_cause().as_str_name());
+                                    ui.label("Reason");
+                                    let reason = position.loss_cause().as_str_name();
+                                    let stripped = if let Some(s) = reason.strip_prefix("DECODER_") { s } else { reason };
+
+                                    ui.label(stripped);
                                     ui.end_row();
                                 }
 
@@ -303,42 +307,42 @@ fn main() -> Result<(), eframe::Error> {
                             .striped(true)
                             .show(ui, |ui| {
                                 ui.label("Timing Advance");
-                                ui.label(calcs.advance.to_string());
+                                ui.label(format!("{:.0}", calcs.advance));
                                 ui.end_row();
 
                                 ui.label("Dwell (uS)");
-                                ui.label(calcs.dwell_us.to_string());
+                                ui.label(format!("{:.0}", calcs.dwell_us));
                                 ui.end_row();
 
                                 ui.label("Fuel (uS)");
-                                ui.label(calcs.fuel_us.to_string());
+                                ui.label(format!("{:.0}", calcs.fuel_us));
                                 ui.end_row();
 
                                 ui.label("Lambda");
-                                ui.label(calcs.lambda.to_string());
+                                ui.label(format!("{:.3}", calcs.lambda));
                                 ui.end_row();
 
                                 ui.label("VE");
-                                ui.label(calcs.ve.to_string());
+                                ui.label(format!("{:.1}", calcs.ve));
                                 ui.end_row();
 
                                 ui.label("Temp Enrichment (%)");
-                                ui.label(calcs.engine_temp_enrichment.to_string());
+                                ui.label(format!("{:.0}", calcs.engine_temp_enrichment));
                                 ui.end_row();
 
                                 ui.separator();
                                 ui.end_row();
 
                                 ui.label("Airmass per cycle (g)");
-                                ui.label(calcs.airmass_per_cycle.to_string());
+                                ui.label(format!("{:.3}", calcs.airmass_per_cycle));
                                 ui.end_row();
 
                                 ui.label("Fuel volume per cycle (cc)");
-                                ui.label(calcs.fuelvol_per_cycle.to_string());
+                                ui.label(format!("{:.3}", calcs.fuelvol_per_cycle));
                                 ui.end_row();
 
                                 ui.label("Pulsewidth Correction (mS)");
-                                ui.label(calcs.pulse_width_correction.to_string());
+                                ui.label(format!("{:.3}", calcs.pulse_width_correction));
                                 ui.end_row();
 
                                 ui.separator();
@@ -422,6 +426,7 @@ fn main() -> Result<(), eframe::Error> {
             };
         });
         egui::CentralPanel::default().show(ctx, |ui| {
+
             ui.input_mut(|i| {
                 // TODO this follow mode should be an explicit option in the UI
                 if state.follow_feed && state.log.is_some() {
@@ -436,35 +441,38 @@ fn main() -> Result<(), eframe::Error> {
                                   .as_nanos() as i64));
 
                 } else if let Some(mut timerange) = state.logview.get_time_range() {
-                    let delta = i.smooth_scroll_delta;
-                    if delta.x != 0.0 || delta.y != 0.0 {
-                        let zoom = -delta.y as f64 / 100.0;
-                        let zoomcenter = i
-                            .pointer
-                            .latest_pos()
-                            .and_then(|p| Some(p.x / ui.max_rect().width()))
-                            .unwrap_or(0.5) as f64;
-                        let shift = delta.x as f64 / 100.0;
+                    // Hack to prevent scroll/drag when settings panes are open
+                    if !state.logview.configuring() {
+                        let delta = i.smooth_scroll_delta;
+                        if delta.x != 0.0 || delta.y != 0.0 {
+                            let zoom = -delta.y as f64 / 100.0;
+                            let zoomcenter = i
+                                .pointer
+                                .latest_pos()
+                                .and_then(|p| Some(p.x / ui.max_rect().width()))
+                                .unwrap_or(0.5) as f64;
+                            let shift = delta.x as f64 / 100.0;
 
-                        let width = (timerange.max - timerange.min) as f64;
-                        let shiftamt = (shift * width) as i64;
+                            let width = (timerange.max - timerange.min) as f64;
+                            let shiftamt = (shift * width) as i64;
 
-                        let new_start = shiftamt
-                            + ((timerange.min as f64) - (width * zoom * zoomcenter)) as i64;
-                        let new_end = shiftamt
-                            + ((timerange.max as f64) + (width * zoom * (1.0 - zoomcenter))) as i64;
+                            let new_start = shiftamt
+                                + ((timerange.min as f64) - (width * zoom * zoomcenter)) as i64;
+                            let new_end = shiftamt
+                                + ((timerange.max as f64) + (width * zoom * (1.0 - zoomcenter))) as i64;
 
-                        timerange = view_cache::Range::new(new_start, new_end);
-                    }
+                            timerange = view_cache::Range::new(new_start, new_end);
+                        }
 
-                    let drag = i.pointer.delta().to_pos2();
-                    if i.pointer.is_decidedly_dragging() && drag.x != 0.0 {
-                        let dragratio = (-drag.x / ui.available_width()) as f64;
-                        let width = (timerange.max - timerange.min) as f64;
+                        let drag = i.pointer.delta().to_pos2();
+                        if i.pointer.is_decidedly_dragging() && drag.x != 0.0 {
+                            let dragratio = (-drag.x / ui.available_width()) as f64;
+                            let width = (timerange.max - timerange.min) as f64;
 
-                        let new_start = timerange.min + (width * dragratio) as i64;
-                        let new_end = timerange.max + (width * dragratio) as i64;
-                        timerange = view_cache::Range::new(new_start, new_end);
+                            let new_start = timerange.min + (width * dragratio) as i64;
+                            let new_end = timerange.max + (width * dragratio) as i64;
+                            timerange = view_cache::Range::new(new_start, new_end);
+                        }
                     }
 
                     state.logview.set_time_range(timerange);
@@ -508,8 +516,8 @@ fn main() -> Result<(), eframe::Error> {
                     }
                 });
             });
-            state.logview.ui(ui);
 
+            state.logview.ui(ui);
 
         });
         ctx.request_repaint();

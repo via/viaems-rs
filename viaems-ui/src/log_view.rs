@@ -27,6 +27,7 @@ pub struct ViewerSeriesConfig {
 pub struct ViewerPaneConfig {
     title: String,
     series: Vec<ViewerSeriesConfig>,
+    settings_open: bool,
 }
 // Toplevel config for the log viewer
 pub struct ViewerConfig {
@@ -48,6 +49,7 @@ impl Default for ViewerConfig {
                         max: 7000.0,
                         color: egui::Color32::RED,
                     }],
+                    settings_open: false,
                 },
                 ViewerPaneConfig {
                     title: "Pane 2".to_owned(),
@@ -67,6 +69,7 @@ impl Default for ViewerConfig {
                             color: egui::Color32::YELLOW,
                         },
                     ],
+                    settings_open: false,
                 },
             ],
             time_range: None,
@@ -170,8 +173,6 @@ impl LogViewer {
             let start = DateTime::from_timestamp_nanos(start_ns);
             let stop = DateTime::from_timestamp_nanos(stop_ns);
 
-            let one_day = start.date_naive() == stop.date_naive();
-
             // Put range labels in bottom corner
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                 ui.horizontal(|ui| {
@@ -193,6 +194,10 @@ impl LogViewer {
 
     pub fn get_time_range(&self) -> Option<Range<i64>> {
         self.behavior.config.time_range.clone()
+    }
+
+    pub fn configuring(&self) -> bool {
+        self.behavior.config.panes.iter().find(|p| p.settings_open).is_some()
     }
 }
 
@@ -231,7 +236,15 @@ impl egui_tiles::Behavior<Pane> for LogViewerBehavior {
 
         let drawrect = ui.max_rect();
 
-        ui.menu_button("⚙", |ui| {
+        let settings_button = ui.add(egui::Button::new("⚙").selected(config.settings_open));
+        if settings_button.clicked() {
+            config.settings_open = !config.settings_open;
+        }
+
+        egui::Popup::from_response(&settings_button)
+            .open_bool(&mut config.settings_open)
+            .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+            .show(|ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 egui::CollapsingHeader::new("Series").default_open(true).show(ui, |ui| {
                     egui::Grid::new("series")
