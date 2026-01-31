@@ -16,7 +16,7 @@ pub enum LoadingStatus {
     Idle,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Range<T> {
     pub min: T,
     pub max: T,
@@ -69,6 +69,10 @@ impl<T: PartialOrd + Copy> Range<T> {
         } else {
             Some(Range::new(start, end))
         }
+    }
+
+    pub fn empty(&self) -> bool {
+        self.min == self.max
     }
 }
 
@@ -599,6 +603,70 @@ impl ViewCache {
 
         let locked = self.state.lock().unwrap();
 
+        // Use the new data cache if we overlap
+        let used_from_newcache: Option<Range<i64>> = Self::get_cache_overlap_point(times, key, &locked.new_data);
+
+        let after_newcache_times = if let Some(overlap) = used_from_newcache {
+            let start_idx = ((overlap.min - times.min) / ns_per_pixel) as usize;
+            let end_idx = ((overlap.max - times.min) / ns_per_pixel) as usize;
+            let render_subslice = &mut render.as_mut_slice()[start_idx..end_idx];
+            Self::render_cache_range_points(overlap, locked.new_data.get(key).unwrap(), render_subslice);
+            Range::new(times.min, overlap.min)
+        } else {
+            times
+        };
+
+
+        // After hotcache, we might have up to two regions that still need to be rendered from
+        // cache, in the case that the hotcache is a pure subset of the render window
+        let mut needed_from_decimations : [Option<Range<i64>>; 2] = [Some(after_newcache_times), None];
+
+        // If we're zoomed in, try to use the hotcache (if we have anything left to render)
+        if !after_newcache_times.empty() && ns_per_pixel <= 50000000 {
+            let used_from_hotcache = Self::get_cache_overlap_point(after_newcache_times, key, &locked.hotcache);
+            if let Some(overlap) = used_from_hotcache {
+                let start_idx = ((overlap.min - times.min) / ns_per_pixel) as usize;
+                let end_idx = ((overlap.max - times.min) / ns_per_pixel) as usize;
+                let render_subslice = &mut render.as_mut_slice()[start_idx..end_idx];
+                Self::render_cache_range_points(overlap, locked.hotcache.get(key).unwrap(), render_subslice);
+            }
+
+
+            if let Some(overlap) = used_from_hotcache {
+                let fully_overlaps = overlap.min <= after_newcache_times.min && overlap.max >= after_newcache_times.max;
+                if fully_overlaps {
+                    needed_from_decimations = [None, None];
+                } else if overlap.min > after_newcache_times.min && overlap.max < after_newcache_times.max {
+                    needed_from_decimations = [Some(Range::new(after_newcache_times.min, overlap.min)), 
+                                               Some(Range::new(overlap.max, after_newcache_times.max))];
+
+                } else if overlap.min > after_newcache_times.min {
+                    needed_from_decimations = [Some(Range::new(after_newcache_times.min, overlap.min)), 
+                                               None];
+                } else if overlap.max < after_newcache_times.max {
+                    needed_from_decimations = [Some(Range::new(overlap.max, after_newcache_times.max)),
+                                               None];
+                }
+            }
+             
+
+            // If not currently loading, and we weren't able to fulfill the whole range, issue a load`
+            if locked.status == LoadingStatus::Done && needed_from_decimations[0].is_some() {
+                // But only if it overlaps with what the log actually holds, so we don't spin trying
+                // to load nonexistant rows forever
+
+                let to_request = after_newcache_times.overlap(&locked.time_range.unwrap_or_default());
+                if let Some(req) = to_request {
+                    self.cmd_chan
+                        .send(ViewBackendCommand::SetHotCache {
+                            keys: self.keys.clone(),
+                            range: req,
+                        })
+                        .unwrap();
+                }
+            }
+        }
+
         let main_cache = if ns_per_pixel > 5000000000 {
             // More than 5 seconds per pixel
             &locked.cache10000
@@ -612,49 +680,14 @@ impl ViewCache {
             None => return render,
         };
 
-        Self::render_cache_range_summaries(times, cache, render.as_mut_slice());
-
-        // Use the new data cache if we overlap
-        let used_from_newcache: Option<Range<i64>> = Self::get_cache_overlap_point(times, key, &locked.new_data);
-        let mut remaining_times = times;
-
-        if let Some(overlap) = used_from_newcache {
-            let start_idx = ((overlap.min - times.min) / ns_per_pixel) as usize;
-            let end_idx = ((overlap.max - times.min) / ns_per_pixel) as usize;
-            let render_subslice = &mut render.as_mut_slice()[start_idx..end_idx];
-            Self::render_cache_range_points(overlap, locked.new_data.get(key).unwrap(), render_subslice);
-            remaining_times = Range::new(times.min, overlap.min);
-        }
-
-
-        // If we're zoomed in, try to use the hotcache (if we have anything left to render)
-        let used_from_hotcache = Self::get_cache_overlap_point(remaining_times, key, &locked.hotcache);
-        if remaining_times.max != remaining_times.min && ns_per_pixel <= 50000000 {
-            if let Some(overlap) = used_from_hotcache {
-                let start_idx = ((overlap.min - times.min) / ns_per_pixel) as usize;
-                let end_idx = ((overlap.max - times.min) / ns_per_pixel) as usize;
+        needed_from_decimations.iter().for_each(|d| {
+            if let Some(range) = d {
+                let start_idx = ((range.min - times.min) / ns_per_pixel) as usize;
+                let end_idx = ((range.max - times.min) / ns_per_pixel) as usize;
                 let render_subslice = &mut render.as_mut_slice()[start_idx..end_idx];
-                Self::render_cache_range_points(overlap, locked.hotcache.get(key).unwrap(), render_subslice);
+                Self::render_cache_range_summaries(*range, cache, render_subslice);
             }
-
-            let request_hotcache = if let Some(overlap) = used_from_hotcache {
-                let fully_overlaps = overlap.min <= remaining_times.min && overlap.max >= remaining_times.max;
-                !fully_overlaps
-            } else {
-                true
-            };
-             
-
-            // If not currently loading, and we weren't able to fulfill the whole range, issue a load`
-            if locked.status == LoadingStatus::Done && request_hotcache {
-                self.cmd_chan
-                    .send(ViewBackendCommand::SetHotCache {
-                        keys: self.keys.clone(),
-                        range: remaining_times,
-                    })
-                    .unwrap();
-            }
-        }
+        });
 
         render
 
