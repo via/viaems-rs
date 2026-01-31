@@ -1,5 +1,3 @@
-pub mod usb;
-pub mod udp;
 pub mod exec;
 
 use std::thread;

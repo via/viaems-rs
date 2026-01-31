@@ -58,32 +58,6 @@ impl<'a> Application {
         println!("Opening log");
     }
 
-    fn connect_udp(&mut self) {
-        let devices = connection::udp::detect(connection::udp::DEFAULT_MCAST_ADDR, Some(Duration::from_millis(100)));
-        if devices.len() > 0 {
-            let conn = connection::Connection::new_udp(&devices[0]);
-            let target = viaems::Manager::new(conn);
-
-            let logwriter : Option<viaems::UpdateWriter> = if let Some(reader) = &self.log {
-                Some(reader.get_writer().expect("Unable to create log writer"))
-            } else {
-                None 
-            };
-
-            target.on_update({
-                let feed_state = self.latest_feed.clone();
-                move |time: SystemTime, update: &interface::EngineUpdate| {
-                    if let Some(w) = &logwriter {
-                        w.add(time, update.clone());
-                    }
-                    Application::update_feed(&feed_state, time, update);
-                }
-            });
-
-            self.target = Some(target);
-        }
-    }
-
     fn connect_exec(&mut self) {
         let conn = connection::Connection::new_exec("/home/via/dev/viaems/obj/hosted/bleh.sh");
         let target = viaems::Manager::new(conn);
@@ -155,10 +129,6 @@ fn main() -> Result<(), eframe::Error> {
                     }
                 }
                 ui.menu_button("Target", |ui| {
-                    if ui.button("Open UDP").clicked() {
-                        state.connect_udp();
-                        ui.close_menu();
-                    }
                     if ui.button("Open Sim").clicked() {
                         state.connect_exec();
                         ui.close_menu();

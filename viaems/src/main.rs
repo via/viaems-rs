@@ -10,7 +10,7 @@ struct CliArgs {
     #[command(subcommand)]
     command: CliCommands,
 
-    #[arg(short = 'c', value_enum, default_value_t = ConnectionMode::Usb)]
+    #[arg(short = 'c', value_enum, default_value_t = ConnectionMode::Exec)]
     mode: ConnectionMode,
 
     #[arg(short = 'd', long)]
@@ -22,8 +22,6 @@ struct CliArgs {
 
 #[derive(ValueEnum, Clone, Debug)]
 enum ConnectionMode {
-    Usb,
-    Udp,
     Exec,
 }
 
@@ -47,22 +45,6 @@ fn main() {
             let binary = args.exec.unwrap_or("viaems".into());
             connection::Connection::new_exec(&binary)
         },
-        ConnectionMode::Udp => {
-            let dest = if let Some(s) = args.udpdest {
-                s.parse().expect("failed to parse udp destination")
-            } else {
-                connection::udp::DEFAULT_MCAST_ADDR
-            };
-
-            let devices = connection::udp::detect(dest, Some(Duration::from_millis(100)));
-            if devices.len() == 0 {
-                panic!("Unable to detect ViaEMS and not dest provided");
-            }
-
-            println!("Connecting to {:?} via {:?}", devices[0].target_ucast_ipaddr, devices[0].local_ipaddr);
-            connection::Connection::new_udp(&devices[0])
-        },
-        ConnectionMode::Usb => connection::Connection::new_usb()
     };
     
 
