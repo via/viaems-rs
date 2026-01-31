@@ -528,7 +528,7 @@ impl ViewCache {
             let start_pos = ((cache[idx].time.min - times.min) / ns_per_pixel) as isize;
             let end_pos = ((cache[idx].time.max - times.min) / ns_per_pixel) as isize;
 
-            if start_pos < 0 || end_pos < 0 {
+            if start_pos < 0 || end_pos < 0 || start_pos >= width as isize || end_pos >= width as isize {
                 continue;
             }
 
@@ -559,7 +559,7 @@ impl ViewCache {
 
         for idx in cache_start_idx..cache_end_idx {
             let pos = ((cache[idx].time - times.min) / ns_per_pixel) as isize;
-            if pos < 0 {
+            if pos < 0 || pos >= width as isize {
                 continue;
             }
             match &mut dest[pos as usize] {
