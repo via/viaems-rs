@@ -510,13 +510,29 @@ impl ViewCache {
         }
     }
 
+    fn window_slice(window_range: Range<i64>, target_range: Range<i64>, render: &mut [Option<PointSummary>]) -> &mut [Option<PointSummary>]
+    {
+        let width = render.len();
+
+        let ns_per_pixel = ((width - 1) as i64 + window_range.max - window_range.min) / width as i64;
+        let start_idx = ((target_range.min - window_range.min) / ns_per_pixel) as usize;
+        let end_idx = ((target_range.max - window_range.min) / ns_per_pixel) as usize;
+        let render_subslice = &mut render[start_idx..end_idx];
+
+        render_subslice
+    }
+
     fn render_cache_range_summaries(
         times: Range<i64>,
         cache: &Vec<PointSummary>,
         dest: &mut [Option<PointSummary>],
     ) {
+
         let cache_start_idx = cache.partition_point(|x| x.time.min < times.min);
-        let cache_end_idx = cache.partition_point(|x| x.time.max < times.max);
+        if cache_start_idx == cache.len() {
+            return;
+        }
+        let cache_end_idx = cache_start_idx + cache[cache_start_idx..].partition_point(|x| x.time.max < times.max);
 
         let width = dest.len();
         if width == 0 {
@@ -525,16 +541,12 @@ impl ViewCache {
         let ns_per_pixel = ((width - 1) as i64 + times.max - times.min) / width as i64;
 
         for idx in cache_start_idx..cache_end_idx {
-            let start_pos = ((cache[idx].time.min - times.min) / ns_per_pixel) as isize;
-            let end_pos = ((cache[idx].time.max - times.min) / ns_per_pixel) as isize;
-
-            if start_pos < 0 || end_pos < 0 || start_pos >= width as isize || end_pos >= width as isize {
-                continue;
-            }
+            let start_pos = ((cache[idx].time.min - times.min) / ns_per_pixel) as usize;
+            let end_pos = ((cache[idx].time.max - times.min) / ns_per_pixel) as usize;
 
             for pos in start_pos..=end_pos {
-                match &mut dest[pos as usize] {
-                    None => dest[pos as usize] = Some(cache[idx]),
+                match &mut dest[pos] {
+                    None => dest[pos] = Some(cache[idx]),
                     Some(x) => {
                         x.expand_to_include_summary(&cache[idx]);
                     }
@@ -549,7 +561,10 @@ impl ViewCache {
         dest: &mut [Option<PointSummary>],
     ) {
         let cache_start_idx = cache.partition_point(|x| x.time < times.min);
-        let cache_end_idx = cache.partition_point(|x| x.time < times.max);
+        if cache_start_idx == cache.len() {
+            return;
+        }
+        let cache_end_idx = cache_start_idx + cache[cache_start_idx..].partition_point(|x| x.time < times.max);
 
         let width = dest.len();
         if width == 0 {
@@ -558,12 +573,9 @@ impl ViewCache {
         let ns_per_pixel = ((width - 1) as i64 + times.max - times.min) / width as i64;
 
         for idx in cache_start_idx..cache_end_idx {
-            let pos = ((cache[idx].time - times.min) / ns_per_pixel) as isize;
-            if pos < 0 || pos >= width as isize {
-                continue;
-            }
-            match &mut dest[pos as usize] {
-                None => dest[pos as usize] = Some(PointSummary::new(cache[idx].time, cache[idx].value)),
+            let pos = ((cache[idx].time - times.min) / ns_per_pixel) as usize;
+            match &mut dest[pos] {
+                None => dest[pos] = Some(PointSummary::new(cache[idx].time, cache[idx].value)),
                 Some(x) => {
                     x.expand_to_include_value(cache[idx].time, cache[idx].value);
                 }
@@ -571,7 +583,7 @@ impl ViewCache {
         }
     }
 
-    fn get_cache_overlap_point(range: Range<i64>, key: &str, cache: &HashMap<String, Vec<Point>>) -> Option<Range<i64>> 
+    fn get_range_overlap_with_points(range: Range<i64>, key: &str, cache: &HashMap<String, Vec<Point>>) -> Option<Range<i64>> 
       
     {
         let mut result = None;
@@ -604,12 +616,10 @@ impl ViewCache {
         let locked = self.state.lock().unwrap();
 
         // Use the new data cache if we overlap
-        let used_from_newcache: Option<Range<i64>> = Self::get_cache_overlap_point(times, key, &locked.new_data);
+        let used_from_newcache: Option<Range<i64>> = Self::get_range_overlap_with_points(times, key, &locked.new_data);
 
         let after_newcache_times = if let Some(overlap) = used_from_newcache {
-            let start_idx = ((overlap.min - times.min) / ns_per_pixel) as usize;
-            let end_idx = ((overlap.max - times.min) / ns_per_pixel) as usize;
-            let render_subslice = &mut render.as_mut_slice()[start_idx..end_idx];
+            let render_subslice = Self::window_slice(times, overlap, render.as_mut_slice());
             Self::render_cache_range_points(overlap, locked.new_data.get(key).unwrap(), render_subslice);
             Range::new(times.min, overlap.min)
         } else {
@@ -623,11 +633,9 @@ impl ViewCache {
 
         // If we're zoomed in, try to use the hotcache (if we have anything left to render)
         if !after_newcache_times.empty() && ns_per_pixel <= 50000000 {
-            let used_from_hotcache = Self::get_cache_overlap_point(after_newcache_times, key, &locked.hotcache);
+            let used_from_hotcache = Self::get_range_overlap_with_points(after_newcache_times, key, &locked.hotcache);
             if let Some(overlap) = used_from_hotcache {
-                let start_idx = ((overlap.min - times.min) / ns_per_pixel) as usize;
-                let end_idx = ((overlap.max - times.min) / ns_per_pixel) as usize;
-                let render_subslice = &mut render.as_mut_slice()[start_idx..end_idx];
+                let render_subslice = Self::window_slice(times, overlap, render.as_mut_slice());
                 Self::render_cache_range_points(overlap, locked.hotcache.get(key).unwrap(), render_subslice);
             }
 
@@ -682,9 +690,7 @@ impl ViewCache {
 
         needed_from_decimations.iter().for_each(|d| {
             if let Some(range) = d {
-                let start_idx = ((range.min - times.min) / ns_per_pixel) as usize;
-                let end_idx = ((range.max - times.min) / ns_per_pixel) as usize;
-                let render_subslice = &mut render.as_mut_slice()[start_idx..end_idx];
+                let render_subslice = Self::window_slice(times, *range, render.as_mut_slice());
                 Self::render_cache_range_summaries(*range, cache, render_subslice);
             }
         });
