@@ -466,6 +466,7 @@ impl Backend {
             .ok(); // TODO should we show that we failed?
 
         self.set_status(LoadingStatus::Done);
+
         let after = SystemTime::now();
         println!(
             "build_decimations took {} ms",

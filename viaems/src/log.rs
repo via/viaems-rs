@@ -238,7 +238,7 @@ impl Log {
         let mut query = "SELECT realtime_ns, ".to_owned();
         query += &key_cols;
         query += &format!(
-            " FROM points where realtime_ns > {} and realtime_ns < {}",
+            " FROM points where realtime_ns > {} and realtime_ns < {} ORDER by realtime_ns",
             start_ns, stop_ns
         );
 
