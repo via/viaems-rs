@@ -11,6 +11,7 @@ use viaems::{self, connection, interface};
 mod log_view;
 mod view_cache;
 mod live_status;
+mod config_pane;
 
 #[derive(Default)]
 struct FeedState {
@@ -22,7 +23,8 @@ struct Application {
     target: Option<viaems::Manager>,
     log: Option<viaems::Log>,
     latest_feed: Arc<Mutex<FeedState>>,
-    latest_configuration: Arc<Mutex<Option<interface::Configuration>>>,
+    live_configuration: Arc<Mutex<Option<interface::Configuration>>>,
+    desired_configuration: Option<interface::Configuration>,
     view_cache: Arc<Mutex<view_cache::ViewCache>>,
     logview: log_view::LogViewer,
     file_dialog: FileDialog,
@@ -40,7 +42,8 @@ impl<'a> Application {
             target: None,
             log: None,
             latest_feed: feed,
-            latest_configuration: Arc::new(Mutex::new(None)),
+            live_configuration: Arc::new(Mutex::new(None)),
+            desired_configuration: None,
             logview: log_view::LogViewer::new(cache.clone()),
             view_cache: cache,
             file_dialog: dialog,
@@ -112,7 +115,7 @@ impl<'a> Application {
             )),
         };
         target.command(req, {
-            let latest_config = self.latest_configuration.clone();
+            let latest_config = self.live_configuration.clone();
             move |resp| {
                 if let Some(response) = resp.response &&
                    let interface::response::Response::Getconfig(config) = response {
@@ -194,11 +197,14 @@ fn main() -> Result<(), eframe::Error> {
             });
 
             egui::SidePanel::right("right panel").show(ctx, |ui| {
-                ui.label("Config Tree!");
-                let latest_config = state.latest_configuration.lock().unwrap();
+                let latest_config = state.live_configuration.lock().unwrap();
                 if let Some(config) = &*latest_config {
-                    ui.label("Rpm limit");
-                    ui.label(config.rpm_cut.unwrap_or_default().rpm_limit_start.unwrap_or_default().to_string());
+                    if state.desired_configuration.is_none() {
+                        state.desired_configuration = Some(config.clone());
+                    }
+                    if let Some(desired) = &mut state.desired_configuration {
+                        config_pane::render_config_pane(ui, desired);
+                    }
                 }
             });
         }
@@ -206,7 +212,7 @@ fn main() -> Result<(), eframe::Error> {
             match &state.target {
                 None => ui.label("Target: Not connected"),
                 Some(_) => {
-                    match *state.latest_configuration.lock().unwrap() {
+                    match *state.live_configuration.lock().unwrap() {
                         None => ui.label("Target: Connecting..."),
                         Some(_) => ui.label("Target: Connected"),
                     }
