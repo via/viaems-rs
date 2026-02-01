@@ -84,6 +84,8 @@ struct Pane {
 pub struct LogViewer {
     tree: egui_tiles::Tree<Pane>,
     behavior: LogViewerBehavior,
+
+    follow_feed: bool,
 }
 
 impl LogViewer {
@@ -98,6 +100,7 @@ impl LogViewer {
                 config: ViewerConfig::default(),
                 cache,
             },
+            follow_feed: false,
         };
 
         for p in &result.behavior.config.panes {
@@ -160,8 +163,84 @@ impl LogViewer {
 
 
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+
+        ui.input_mut(|i| {
+            if self.follow_feed {
+                let maybe_range = self.behavior.cache.lock().unwrap().get_log_time_range();
+                if let Some(range) = maybe_range {
+                    let twentyago = range.max - 20_000_000_000;
+                    self.set_time_range(view_cache::Range::new(twentyago, range.max));
+
+                }
+            } else if let Some(mut timerange) = self.get_time_range() {
+                // Hack to prevent scroll/drag when settings panes are open
+                if !self.configuring() {
+                    let delta = i.smooth_scroll_delta;
+                    if delta.x != 0.0 || delta.y != 0.0 {
+                        let zoom = -delta.y as f64 / 100.0;
+                        let zoomcenter = i
+                            .pointer
+                            .latest_pos()
+                            .and_then(|p| Some(p.x / ui.max_rect().width()))
+                            .unwrap_or(0.5) as f64;
+                        let shift = delta.x as f64 / 100.0;
+
+                        let width = (timerange.max - timerange.min) as f64;
+                        let shiftamt = (shift * width) as i64;
+
+                        let new_start = shiftamt
+                            + ((timerange.min as f64) - (width * zoom * zoomcenter)) as i64;
+                        let new_end = shiftamt
+                            + ((timerange.max as f64) + (width * zoom * (1.0 - zoomcenter))) as i64;
+
+                        timerange = view_cache::Range::new(new_start, new_end);
+                    }
+
+                    let drag = i.pointer.delta().to_pos2();
+                    if i.pointer.is_decidedly_dragging() && drag.x != 0.0 {
+                        let dragratio = (-drag.x / ui.available_width()) as f64;
+                        let width = (timerange.max - timerange.min) as f64;
+
+                        let new_start = timerange.min + (width * dragratio) as i64;
+                        let new_end = timerange.max + (width * dragratio) as i64;
+                        timerange = view_cache::Range::new(new_start, new_end);
+                    }
+                }
+
+                self.set_time_range(timerange);
+            }
+
+            if i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::default(),
+                    egui::Key::F,
+            )) {
+                self.follow_feed = !self.follow_feed;
+            }
+        });
+        ui.with_layout(egui::Layout::top_down(egui::Align::Max),|ui| {
+            ui.horizontal(|ui| {
+                if ui.add(egui::Button::new("⛶"))
+                    .on_hover_text("Show entire log")
+                        .clicked() {
+                            let maybe_range = self.behavior.cache.lock().unwrap().get_log_time_range();
+                            if let Some(range) = maybe_range {
+                                self.set_time_range(range);
+                                self.follow_feed = false;
+                            }
+                        }
+
+                let follow_button = egui::Button::new("⏭").selected(self.follow_feed);
+                if ui.add(follow_button)
+                    .on_hover_text("Update viewer time range for new data automatically")
+                        .clicked() {
+                            self.follow_feed = !self.follow_feed;
+                }
+            });
+        });
+
         let before_keys = self.current_keys();
         self.tree.ui(&mut self.behavior, ui);
+        // TODO hack, find a way to just trigger this from the settings itself
         if self.current_keys() != before_keys {
             self.behavior.cache.lock().unwrap().set_keys(&self.current_keys());
         }
@@ -188,15 +267,15 @@ impl LogViewer {
         }
     }
 
-    pub fn set_time_range(&mut self, range: Range<i64>) {
+    fn set_time_range(&mut self, range: Range<i64>) {
         self.behavior.config.time_range = Some(range)
     }
 
-    pub fn get_time_range(&self) -> Option<Range<i64>> {
+    fn get_time_range(&self) -> Option<Range<i64>> {
         self.behavior.config.time_range.clone()
     }
 
-    pub fn configuring(&self) -> bool {
+    fn configuring(&self) -> bool {
         self.behavior.config.panes.iter().find(|p| p.settings_open).is_some()
     }
 }
