@@ -199,6 +199,10 @@ impl Backend {
                     self.set_status(LoadingStatus::Idle);
                 }
                 Ok(ViewBackendCommand::Open(r)) => {
+                    self.state.lock().unwrap().cache100.clear();
+                    self.state.lock().unwrap().cache10000.clear();
+                    self.state.lock().unwrap().hotcache.clear();
+                    self.state.lock().unwrap().new_data.clear();
                     // Determine overall point count of the file
                     self.set_status(LoadingStatus::Loading { progress: 0.0 });
                     if let Some(earliest) = r.get_earliest_time() &&
@@ -349,7 +353,13 @@ impl Backend {
 
         let mut current_count = 0;
 
-        let refkeys: Vec<&str> = new_keys.iter().map(|x| x.as_str()).collect();
+        // Only add keys that aren't already in the cache
+        let refkeys : Vec<&str> = {
+            let locked = self.state.lock().unwrap();
+            new_keys.iter()
+                .filter(|x| locked.cache100.get(*x).is_none())
+                .map(|x| x.as_str()).collect()
+        };
 
         let mut current_cache100 = Vec::new();
         let mut current_cache10000 = Vec::new();
@@ -464,6 +474,7 @@ impl Backend {
                 }
             })
             .ok(); // TODO should we show that we failed?
+                   //
 
         self.set_status(LoadingStatus::Done);
 
@@ -546,6 +557,7 @@ impl ViewCache {
             let end_pos = ((cache[idx].time.max - times.min) / ns_per_pixel) as usize;
 
             for pos in start_pos..=end_pos {
+
                 match &mut dest[pos] {
                     None => dest[pos] = Some(cache[idx]),
                     Some(x) => {

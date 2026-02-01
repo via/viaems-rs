@@ -138,6 +138,7 @@ fn main() -> Result<(), eframe::Error> {
 
         let now = SystemTime::now();
         let render_time = now.duration_since(state.last_update_time).unwrap();
+        let mut should_reload = false;
         state.last_update_time = now;
 
         egui::TopBottomPanel::top("Menubar").show(ctx, |ui| {
@@ -167,6 +168,7 @@ fn main() -> Result<(), eframe::Error> {
             });
         });
         if state.target.is_some() {
+            should_reload = true;
             egui::SidePanel::left("left panel")
                 .min_width(250.0)
                 .show(ctx, |ui| {
@@ -406,6 +408,7 @@ fn main() -> Result<(), eframe::Error> {
                     match view.get_status() {
                         view_cache::LoadingStatus::Done => log_str += " Loaded",
                         view_cache::LoadingStatus::Loading { progress } => {
+                            should_reload = true;
                             log_str += &format!(" {:.0}%", progress)
                         }
                         view_cache::LoadingStatus::Idle => log_str += " Idle",
@@ -520,6 +523,8 @@ fn main() -> Result<(), eframe::Error> {
             state.logview.ui(ui);
 
         });
-        ctx.request_repaint();
+        if should_reload {
+            ctx.request_repaint();
+        }
     })
 }
