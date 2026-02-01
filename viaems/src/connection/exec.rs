@@ -1,7 +1,7 @@
 use std::sync::{mpsc, atomic, Arc};
 use crate::connection::{Connection, RxMessage};
 use crate::interface;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, Duration};
@@ -71,12 +71,26 @@ impl Connection {
             let mut stdin = subproc.stdin.take().unwrap();
             let running = running.clone();
             move || {
+                let CRC32 = crc::Crc::<u32>::new(&crc::CRC_32_ISO_HDLC);
                 loop {
                     if !running.load(atomic::Ordering::Relaxed) {
                         break;
                     }
                     match send_rx.recv_timeout(Duration::from_millis(100)) {
-                        Ok(_) => {
+                        Ok(command) => {
+                            let pdu = prost::Message::encode_to_vec(&command);
+                            let len_bytes = (pdu.len() as u16).to_le_bytes();
+                            let crc_bytes = CRC32.checksum(pdu.as_slice()).to_le_bytes();
+
+                            let mut frame = Vec::with_capacity(len_bytes.len() + pdu.len() + crc_bytes.len());
+                            frame.extend_from_slice(&len_bytes);
+                            frame.extend_from_slice(pdu.as_slice());
+                            frame.extend_from_slice(&crc_bytes);
+
+                            let mut cobs = cobs::encode_vec(frame.as_slice());
+                            cobs.extend_from_slice(&[0 as u8]);
+
+                            stdin.write(cobs.as_slice()).unwrap();
                         }
                         Err(mpsc::RecvTimeoutError::Timeout) => continue,
                         _ => break,

@@ -22,6 +22,7 @@ struct Application {
     target: Option<viaems::Manager>,
     log: Option<viaems::Log>,
     latest_feed: Arc<Mutex<FeedState>>,
+    latest_configuration: Arc<Mutex<Option<interface::Configuration>>>,
     view_cache: Arc<Mutex<view_cache::ViewCache>>,
     logview: log_view::LogViewer,
     file_dialog: FileDialog,
@@ -39,6 +40,7 @@ impl<'a> Application {
             target: None,
             log: None,
             latest_feed: feed,
+            latest_configuration: Arc::new(Mutex::new(None)),
             logview: log_view::LogViewer::new(cache.clone()),
             view_cache: cache,
             file_dialog: dialog,
@@ -100,6 +102,22 @@ impl<'a> Application {
                 }
                 view.lock().unwrap().add_new_data(time, update);
                 Application::update_feed(&feed_state, time, update);
+            }
+        });
+
+        let req = interface::Request {
+            id: 1,
+            request: Some(interface::request::Request::Getconfig(
+                    interface::request::GetConfig{}
+            )),
+        };
+        target.command(req, {
+            let latest_config = self.latest_configuration.clone();
+            move |resp| {
+                if let Some(response) = resp.response &&
+                   let interface::response::Response::Getconfig(config) = response {
+                    *latest_config.lock().unwrap() = config.config;
+                }
             }
         });
 
@@ -174,11 +192,25 @@ fn main() -> Result<(), eframe::Error> {
                     let latest_feed = state.latest_feed.lock().unwrap().update.clone();
                     live_status::render_status_pane(ui, &latest_feed);
             });
+
+            egui::SidePanel::right("right panel").show(ctx, |ui| {
+                ui.label("Config Tree!");
+                let latest_config = state.latest_configuration.lock().unwrap();
+                if let Some(config) = &*latest_config {
+                    ui.label("Rpm limit");
+                    ui.label(config.rpm_cut.unwrap_or_default().rpm_limit_start.unwrap_or_default().to_string());
+                }
+            });
         }
         egui::TopBottomPanel::bottom("Status").show(ctx, |ui| {
             match &state.target {
                 None => ui.label("Target: Not connected"),
-                Some(_) => ui.label("Target: Connected!"),
+                Some(_) => {
+                    match *state.latest_configuration.lock().unwrap() {
+                        None => ui.label("Target: Connecting..."),
+                        Some(_) => ui.label("Target: Connected"),
+                    }
+                }
             };
             match &state.log {
                 None => ui.label("Log: Not connected"),
