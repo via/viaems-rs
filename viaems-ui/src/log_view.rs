@@ -174,7 +174,8 @@ impl LogViewer {
                 }
             } else if let Some(mut timerange) = self.get_time_range() {
                 // Hack to prevent scroll/drag when settings panes are open
-                if !self.configuring() {
+                let rect = ui.max_rect();
+                if !self.configuring() && rect.contains(i.pointer.interact_pos().unwrap_or_default()) {
                     let delta = i.smooth_scroll_delta;
                     if delta.x != 0.0 || delta.y != 0.0 {
                         let zoom = -delta.y as f64 / 100.0;
