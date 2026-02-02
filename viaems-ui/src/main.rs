@@ -12,6 +12,7 @@ mod log_view;
 mod view_cache;
 mod live_status;
 mod config_pane;
+mod table_editor;
 
 #[derive(Default)]
 struct FeedState {
@@ -68,7 +69,7 @@ impl<'a> Application {
             let conn = connection::Connection::new_udp(&devices[0]);
             let target = viaems::Manager::new(conn);
 
-            let logwriter : Option<viaems::UpdateWriter> = if let Some(reader) = &self.log {
+            let logwriter = if let Some(reader) = &self.log {
                 Some(reader.get_writer().expect("Unable to create log writer"))
             } else {
                 None 
@@ -154,7 +155,7 @@ fn main() -> Result<(), eframe::Error> {
     }
 
     eframe::run_simple_native("Viaems UI", options, move |ctx, _frame| {
-        ctx.set_pixels_per_point(1.5);
+        //ctx.set_pixels_per_point(1.5);
 
         let now = SystemTime::now();
         let render_time = now.duration_since(state.last_update_time).unwrap();
@@ -203,6 +204,7 @@ fn main() -> Result<(), eframe::Error> {
                         state.desired_configuration = Some(config.clone());
                     }
                     if let Some(desired) = &mut state.desired_configuration {
+
                         config_pane::render_config_pane(ui, desired);
                     }
                 }
