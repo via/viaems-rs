@@ -299,7 +299,7 @@ message Configuration {
     optional float fixed_dwell = 2;
     optional float fixed_duty = 3;
 
-    optional float ignitions_per_cycle = 4;
+    optional float ignitions_per_cycle = 4; // TODO int?
     optional uint32 min_coil_cooldown_us = 5;
     optional uint32 min_dwell_us = 6;
 

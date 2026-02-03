@@ -14,7 +14,7 @@ impl Table2dEditor {
         let mut modified = false;
 
         egui::Grid::new("table")
-            .num_columns(table.cols.as_ref().unwrap().values.len())
+            .num_columns(table.cols.as_ref().unwrap().values.len() + 1)
             .striped(true)
             .show(ui, |ui| {
                 if let Some(cols) = &table.cols {
@@ -52,3 +52,42 @@ impl Table2dEditor {
 
 }
 
+
+pub struct Table1dEditor {
+}
+
+impl Table1dEditor {
+
+    pub fn new() -> Self {
+        Table1dEditor {
+        }
+    }
+
+    pub fn show(&mut self, ui: &mut egui::Ui, table: &mut configuration::Table1d) -> bool {
+        let mut modified = false;
+
+        egui::Grid::new("table")
+            .num_columns(2)
+            .striped(true)
+            .show(ui, |ui| {
+                let cols = table.data.get_or_insert_default();
+                for (col_idx, col) in cols.values.iter_mut().enumerate() {
+                    let col_label = if let Some(colaxis) = &table.cols {
+                        colaxis.values[col_idx]
+                    } else {
+                        0.0
+                    };
+                    let col_label_str = format!("{:3}", col_label);
+                    ui.label(col_label_str);
+
+                    let field = egui::DragValue::new(col).update_while_editing(false);
+                    if ui.add(field).changed() {
+                        modified = true;
+                    }
+                    ui.end_row();
+                }
+            });
+        modified
+    }
+
+}
