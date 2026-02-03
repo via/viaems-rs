@@ -13,6 +13,7 @@ mod view_cache;
 mod live_status;
 mod config_pane;
 mod table_editor;
+//mod config_section;
 
 #[derive(Default)]
 struct FeedState {
@@ -155,7 +156,7 @@ fn main() -> Result<(), eframe::Error> {
     }
 
     eframe::run_simple_native("Viaems UI", options, move |ctx, _frame| {
-        //ctx.set_pixels_per_point(1.5);
+        ctx.set_pixels_per_point(1.5);
 
         let now = SystemTime::now();
         let render_time = now.duration_since(state.last_update_time).unwrap();
@@ -198,15 +199,44 @@ fn main() -> Result<(), eframe::Error> {
             });
 
             egui::SidePanel::right("right panel").show(ctx, |ui| {
+
+                ui.horizontal(|ui| {
+                    if ui.button("Save").clicked() {
+                        if let Some(target) = &state.target {
+                            let req = interface::Request {
+                                id: 1,
+                                request: Some(interface::request::Request::Setconfig(
+                                        interface::request::SetConfig{
+                                          config: state.desired_configuration.clone()
+                                        }
+                                )),
+                            };
+                            println!("SEND {:?}", req);
+                            target.command(req, {
+                                let latest_config = state.live_configuration.clone();
+                                move |resp| {
+                                    println!("GOT");
+                                    if let Some(response) = resp.response &&
+                                        let interface::response::Response::Setconfig(config) = response {
+                                            *latest_config.lock().unwrap() = config.config;
+                                    }
+                                }
+                            });
+                        }
+                    }
+                    let mut autosave = false;
+                    ui.checkbox(&mut autosave, "Autosave");
+                    if ui.button("Revert").clicked() {
+                        let latest_config = state.live_configuration.lock().unwrap();
+                        state.desired_configuration = latest_config.clone();
+                    }
+                });
+
+                ui.separator();
                 let latest_config = state.live_configuration.lock().unwrap();
                 if let Some(config) = &*latest_config {
-                    if state.desired_configuration.is_none() {
-                        state.desired_configuration = Some(config.clone());
-                    }
-                    if let Some(desired) = &mut state.desired_configuration {
-
-                        config_pane::render_config_pane(ui, desired);
-                    }
+                    let desired = state.desired_configuration.get_or_insert(config.clone());
+                    config_pane::render_config_pane(ui, config, desired);
                 }
             });
         }

@@ -64,7 +64,12 @@ impl Connection {
                     match send_rx.recv_timeout(Duration::from_millis(100)) {
                         Ok(command) => {
                             let pdu = prost::Message::encode_to_vec(&command);
-                            stdin.write(stream::write(pdu.as_slice()).as_slice()).unwrap();
+                            let encoded = stream::write(pdu.as_slice()); 
+                            let mut position = 0;
+
+                            while position < encoded.len() {
+                                position += stdin.write(&encoded.as_slice()[position..]).unwrap();
+                            }
                         }
                         Err(mpsc::RecvTimeoutError::Timeout) => continue,
                         _ => break,

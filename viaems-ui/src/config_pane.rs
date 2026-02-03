@@ -1,145 +1,152 @@
 use crate::interface;
 use crate::table_editor::{Table2dEditor, Table1dEditor};
 
-fn render_single_value_input<T: emath::Numeric>(ui: &mut egui::Ui, field: &mut T, name: &str) { 
+
+fn render_single_optional_value_input<T: emath::Numeric + Default>(ui: &mut egui::Ui, reference: &Option<T>, field: &mut Option<T>, name: &str) { 
+
+    let reference = *reference.clone().get_or_insert_default();
+    let field = field.get_or_insert_default();
+    render_single_value_input(ui, &reference, field, name);
+}
+
+fn render_single_value_input<T: emath::Numeric>(ui: &mut egui::Ui, reference: &T, field: &mut T, name: &str) { 
     ui.horizontal(|ui| {
         ui.label(name);
         ui.add(egui::DragValue::new(field)
             .update_while_editing(false));
-            });
+        if reference != field {
+            if ui.button(egui::RichText::new("↺").color(egui::Color32::RED)).clicked() {
+                *field = reference.clone();
+            }
+        }
+    });
 }
 
-fn render_sensor(ui: &mut egui::Ui, name: &str, sensor: &mut Option<interface::configuration::Sensor>) {
+fn render_enum_selector<T: PartialEq + Copy>(ui: &mut egui::Ui, reference: Option<i32>, field: &mut Option<i32>, name: &str,
+    entries: &[(T, &str)]) 
+  where i32: TryFrom<T>
+{
+    ui.horizontal(|ui| {
+        ui.label(name);
+
+        let mut selected_text : Option<&str> = None;
+        for (i, s) in entries.iter() {
+            let i_as_i32 = i32::try_from(*i).unwrap_or(0);
+
+            if *field.get_or_insert_default() == i_as_i32 {
+                selected_text = Some(s);
+            }
+        }
+        let selected_text = selected_text.unwrap_or(entries[0].1);
+
+        let field_as_i32 = field.get_or_insert_default();
+        egui::ComboBox::from_id_salt(name).selected_text(selected_text).show_ui(ui, |ui| {
+            for (i, s) in entries.iter() {
+                let i_as_i32 = i32::try_from(*i).unwrap_or(0);
+                ui.selectable_value(field_as_i32, i_as_i32, *s);
+            }
+        });
+        if reference.unwrap_or_default() != *field_as_i32 {
+            if ui.button(egui::RichText::new("↺").color(egui::Color32::RED)).clicked() {
+                *field = reference;
+            }
+        }
+    });
+}
+
+fn red_if_changed<T: PartialEq>(reference: &T, local: &T, text: &str) -> egui::RichText {
+    if reference == local {
+        egui::RichText::new(text)
+    } else {
+        egui::RichText::new(text).color(egui::Color32::RED)
+    }
+}
+
+fn render_sensor(ui: &mut egui::Ui, name: &str, live_sensor: &Option<interface::configuration::Sensor>, sensor: &mut Option<interface::configuration::Sensor>) {
     let sensor = sensor.get_or_insert_default();
+    let sensor_ref = live_sensor.clone().unwrap_or_default();
 
-    egui::CollapsingHeader::new(name.to_string()).show(ui, |ui| {
-        let mut sourcevalue = sensor.source();
-        let sourcetext = match sourcevalue {
-            interface::configuration::SensorSource::SourceNone => "None",
-            interface::configuration::SensorSource::SourceAdc => "Adc",
-            interface::configuration::SensorSource::SourceFreq => "Frequency",
-            interface::configuration::SensorSource::SourcePulsewidth => "Pulsewidth",
-            interface::configuration::SensorSource::SourceConst => "Constant",
-        };
+    egui::CollapsingHeader::new(red_if_changed(&sensor_ref, sensor, name)).show(ui, |ui| {
+        render_enum_selector(ui, 
+            sensor_ref.source, 
+            &mut sensor.source,
+            "Source",
+            &[
+            (interface::configuration::SensorSource::SourceNone, "None"),
+            (interface::configuration::SensorSource::SourceAdc, "Adc"),
+            (interface::configuration::SensorSource::SourceFreq, "Frequency"),
+            (interface::configuration::SensorSource::SourcePulsewidth, "Pulsewidth"),
+            (interface::configuration::SensorSource::SourceConst, "Constant"),
+            ]);
 
-        ui.horizontal(|ui| {
-            ui.label("Source");
-            egui::ComboBox::from_id_salt("Source")
-                .selected_text(sourcetext)
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut sourcevalue,
-                        interface::configuration::SensorSource::SourceNone,
-                        "None");
-                    ui.selectable_value(&mut sourcevalue,
-                        interface::configuration::SensorSource::SourceAdc,
-                        "Adc");
-                    ui.selectable_value(&mut sourcevalue,
-                        interface::configuration::SensorSource::SourceFreq,
-                        "Frequency");
-                    ui.selectable_value(&mut sourcevalue,
-                        interface::configuration::SensorSource::SourcePulsewidth,
-                        "Pulsewidth");
-                    ui.selectable_value(&mut sourcevalue,
-                        interface::configuration::SensorSource::SourceConst,
-                        "Constant");
+        render_enum_selector(ui, 
+            sensor_ref.method, 
+            &mut sensor.method,
+            "Method",
+            &[
+            (interface::configuration::SensorMethod::MethodLinear, "Linear"),
+            (interface::configuration::SensorMethod::MethodLinearWindowed, "Linear windows"),
+            (interface::configuration::SensorMethod::MethodThermistor, "Thermistor"),
+            ]);
 
-                });
-            sensor.source = Some(sourcevalue as i32);
-        });
 
-        let mut methodvalue = sensor.method();
-        let methodtext = match methodvalue {
-            interface::configuration::SensorMethod::MethodLinear => "Linear",
-            interface::configuration::SensorMethod::MethodLinearWindowed => "Linear windowed",
-            interface::configuration::SensorMethod::MethodThermistor => "Thermistor",
-        };
-
-        ui.horizontal(|ui| {
-            ui.label("Method");
-            egui::ComboBox::from_id_salt("Method")
-                .selected_text(methodtext)
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut methodvalue,
-                        interface::configuration::SensorMethod::MethodLinear,
-                        "Linear");
-                    ui.selectable_value(&mut methodvalue,
-                        interface::configuration::SensorMethod::MethodLinearWindowed,
-                        "Linear windowed");
-                    ui.selectable_value(&mut methodvalue,
-                        interface::configuration::SensorMethod::MethodThermistor,
-                        "Thermistor");
-
-                });
-            sensor.method = Some(methodvalue as i32);
-        });
-
-        render_single_value_input(ui, sensor.pin.get_or_insert_default(), "Pin");
-        render_single_value_input(ui, sensor.lag.get_or_insert_default(), "Lag filter");
+        render_single_optional_value_input(ui, &sensor_ref.pin, &mut sensor.pin, "Pin");
+        render_single_optional_value_input(ui, &sensor_ref.lag, &mut sensor.lag, "Lag filter");
 
         ui.separator();
 
-        if sourcevalue == interface::configuration::SensorSource::SourceConst {
-            let mut cc = sensor.const_config.unwrap_or_default();
-            render_single_value_input(ui, &mut cc.fixed_value, "Fixed Value");
-            sensor.const_config = Some(cc);
+        if sensor.source() == interface::configuration::SensorSource::SourceConst {
+            let cc = sensor.const_config.get_or_insert_default();
+            let cc_ref = sensor_ref.const_config.unwrap_or_default();
+            render_single_value_input(ui, &cc_ref.fixed_value, &mut cc.fixed_value, "Fixed Value");
         } else {
-            if (methodvalue == interface::configuration::SensorMethod::MethodLinear) ||
-               (methodvalue == interface::configuration::SensorMethod::MethodLinearWindowed) {
-                let mut lc = sensor.linear_config.unwrap_or_default();
+            if (sensor.method() == interface::configuration::SensorMethod::MethodLinear) ||
+                (sensor.method() == interface::configuration::SensorMethod::MethodLinearWindowed) {
+                    let lc = sensor.linear_config.get_or_insert_default();
+                    let lc_ref = sensor_ref.linear_config.unwrap_or_default();
+                    render_single_value_input(ui, &lc_ref.input_min, &mut lc.input_min, "Input lower bound");
+                    render_single_value_input(ui, &lc_ref.input_max, &mut lc.input_max, "Input upper bound");
+                    render_single_value_input(ui, &lc_ref.output_min, &mut lc.output_min, "Output lower bound");
+                    render_single_value_input(ui, &lc_ref.output_max, &mut lc.output_max, "Output upper bound");
 
-                ui.horizontal(|ui| {
-                    ui.label("Input Range");
-                    ui.add(egui::DragValue::new(&mut lc.input_min).update_while_editing(false));
-                    ui.add(egui::DragValue::new(&mut lc.input_max).update_while_editing(false));
+                    if sensor.method() == interface::configuration::SensorMethod::MethodLinearWindowed {
+                        ui.separator();
+                        let wc = sensor.window_config.get_or_insert_default();
+                        let wc_ref = sensor_ref.window_config.unwrap_or_default();
 
+                        render_single_value_input(ui, &wc_ref.capture_width, &mut wc.capture_width, "Window Capture Opening");
+                        render_single_value_input(ui, &wc_ref.total_width, &mut wc.total_width, "Window Total Width");
+                        render_single_value_input(ui, &wc_ref.offset, &mut wc.offset, "Window Offset");
+                    }
+                } else if sensor.method() == interface::configuration::SensorMethod::MethodThermistor {
+                    let tc = sensor.thermistor_config.get_or_insert_default();
+                    let tc_ref = sensor_ref.thermistor_config.unwrap_or_default();
 
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("Output Range");
-                    ui.add(egui::DragValue::new(&mut lc.output_min).update_while_editing(false));
-                    ui.add(egui::DragValue::new(&mut lc.output_max).update_while_editing(false));
-                });
-
-                sensor.linear_config = Some(lc);
-
-                if methodvalue == interface::configuration::SensorMethod::MethodLinearWindowed {
-                    ui.separator();
-                    let mut wc = sensor.window_config.unwrap_or_default();
-
-                    render_single_value_input(ui, &mut wc.capture_width, "Window Capture Opening");
-                    render_single_value_input(ui, &mut wc.total_width, "Window Total Width");
-                    render_single_value_input(ui, &mut wc.offset, "Window Offset");
-
-                    sensor.window_config = Some(wc);
-
+                    render_single_value_input(ui, &tc_ref.bias, &mut tc.bias, "Bias (Ohms)");
+                    render_single_value_input(ui, &tc_ref.a, &mut tc.a, "A");
+                    render_single_value_input(ui, &tc_ref.b, &mut tc.b, "B");
+                    render_single_value_input(ui, &tc_ref.c, &mut tc.c, "C");
                 }
-        } else if methodvalue == interface::configuration::SensorMethod::MethodThermistor {
-            let mut tc = sensor.thermistor_config.unwrap_or_default();
 
-            render_single_value_input(ui, &mut tc.bias, "Bias (Ohms)");
-            render_single_value_input(ui, &mut tc.a, "A");
-            render_single_value_input(ui, &mut tc.b, "B");
-            render_single_value_input(ui, &mut tc.c, "C");
-
-            sensor.thermistor_config = Some(tc);
-        }
-            let mut fc = sensor.fault_config.unwrap_or_default();
+            let fc = sensor.fault_config.get_or_insert_default();
+            let fc_ref = sensor_ref.fault_config.unwrap_or_default();
 
             ui.separator();
 
-            render_single_value_input(ui, &mut fc.min, "Minimum Input");
-            render_single_value_input(ui, &mut fc.max, "Maximum Input");
-            render_single_value_input(ui, &mut fc.value, "Fallback value");
+            render_single_value_input(ui, &fc_ref.min, &mut fc.min, "Minimum Input");
+            render_single_value_input(ui, &fc_ref.max, &mut fc.max, "Maximum Input");
+            render_single_value_input(ui, &fc_ref.value, &mut fc.value, "Fallback value");
 
         }
 
     });
 }
 
-pub fn render_config_pane(ui: &mut egui::Ui, config: &mut interface::Configuration) {
+pub fn render_config_pane(ui: &mut egui::Ui, live_config: &interface::Configuration, local_config: &mut interface::Configuration) {
     egui::ScrollArea::vertical().show(ui, |ui| {
-        egui::CollapsingHeader::new("Outputs").show(ui, |ui| {
+
+        egui::CollapsingHeader::new(red_if_changed(&live_config.outputs, &local_config.outputs, "Outputs"))
+            .show(ui, |ui| {
             egui::Grid::new("outputlist")
                 .num_columns(4)
                 .striped(true)
@@ -150,7 +157,7 @@ pub fn render_config_pane(ui: &mut egui::Ui, config: &mut interface::Configurati
                     ui.label("Inverted");
                     ui.end_row();
 
-                    for (idx, output) in config.outputs.iter_mut().enumerate() {
+                    for (idx, output) in local_config.outputs.iter_mut().enumerate() {
                         let mut selvalue = output.r#type();
                         let seltext = match selvalue {
                             interface::configuration::output::OutputType::OutputDisabled => "Disabled",
@@ -181,12 +188,19 @@ pub fn render_config_pane(ui: &mut egui::Ui, config: &mut interface::Configurati
                         ui.checkbox(&mut inverted, "");
                         output.inverted = Some(inverted);
 
+                        if *output != live_config.outputs[idx] {
+                            if ui.button(egui::RichText::new("↺").color(egui::Color32::RED)).clicked() {
+                                *output = live_config.outputs[idx].clone();
+                            }
+                        }
+
+
                         ui.end_row();
                     }
                 });
         });
 
-        egui::CollapsingHeader::new("Inputs").show(ui, |ui| {
+        egui::CollapsingHeader::new(red_if_changed(&live_config.triggers, &local_config.triggers, "Triggers")).show(ui, |ui| {
             egui::Grid::new("inputlist")
                 .num_columns(2)
                 .striped(true)
@@ -195,8 +209,8 @@ pub fn render_config_pane(ui: &mut egui::Ui, config: &mut interface::Configurati
                     ui.label("Edge");
                     ui.end_row();
 
-                    for (idx, input) in config.triggers.iter_mut().enumerate() {
-                        let mut typevalue = input.r#type();
+                    for (idx, trigger) in local_config.triggers.iter_mut().enumerate() {
+                        let mut typevalue = trigger.r#type();
                         let typetext = match typevalue {
                             interface::configuration::InputType::InputDisabled => "Disabled",
                             interface::configuration::InputType::InputTrigger => "Trigger",
@@ -221,9 +235,9 @@ pub fn render_config_pane(ui: &mut egui::Ui, config: &mut interface::Configurati
                                     "Frequency");
 
                             });
-                        input.r#type = Some(typevalue as i32);
+                        trigger.r#type = Some(typevalue as i32);
 
-                        let mut edgevalue = input.edge();
+                        let mut edgevalue = trigger.edge();
                         let edgetext = match edgevalue {
                             interface::configuration::InputEdge::EdgeRising => "Rising",
                             interface::configuration::InputEdge::EdgeFalling => "Falling",
@@ -245,74 +259,59 @@ pub fn render_config_pane(ui: &mut egui::Ui, config: &mut interface::Configurati
                                     "Both");
 
                             });
-                        input.edge = Some(edgevalue as i32);
+                        trigger.edge = Some(edgevalue as i32);
+
+                        if *trigger != live_config.triggers[idx] {
+                            if ui.button(egui::RichText::new("↺").color(egui::Color32::RED)).clicked() {
+                                *trigger = live_config.triggers[idx].clone();
+                            }
+                        }
                         ui.end_row();
                     }
                 });
 
         });
 
-        egui::CollapsingHeader::new("Sensors").show(ui, |ui| {
-            let sensors = config.sensors.get_or_insert_default();
-            render_sensor(ui, "MAP", &mut sensors.map);
-            render_sensor(ui, "AAP", &mut sensors.aap);
-            render_sensor(ui, "BRV", &mut sensors.brv);
-            render_sensor(ui, "CLT", &mut sensors.clt);
-            render_sensor(ui, "IAT", &mut sensors.iat);
-            render_sensor(ui, "TPS", &mut sensors.tps);
-            render_sensor(ui, "EGO", &mut sensors.ego);
-            render_sensor(ui, "FRP", &mut sensors.frp);
-            render_sensor(ui, "FRT", &mut sensors.frt);
-            render_sensor(ui, "ETH", &mut sensors.eth);
+        let sensors = local_config.sensors.get_or_insert_default();
+        let sensors_ref = live_config.sensors.clone().unwrap_or_default();
+        egui::CollapsingHeader::new(red_if_changed(&sensors_ref, sensors, "Sensors")).show(ui, |ui| {
+            render_sensor(ui, "MAP", &sensors_ref.map, &mut sensors.map);
+            render_sensor(ui, "AAP", &sensors_ref.aap, &mut sensors.aap);
+            render_sensor(ui, "BRV", &sensors_ref.brv, &mut sensors.brv);
+            render_sensor(ui, "CLT", &sensors_ref.clt, &mut sensors.clt);
+            render_sensor(ui, "IAT", &sensors_ref.iat, &mut sensors.iat);
+            render_sensor(ui, "TPS", &sensors_ref.tps, &mut sensors.tps);
+            render_sensor(ui, "EGO", &sensors_ref.ego, &mut sensors.ego);
+            render_sensor(ui, "FRP", &sensors_ref.frp, &mut sensors.frp);
+            render_sensor(ui, "FRT", &sensors_ref.frt, &mut sensors.frt);
+            render_sensor(ui, "ETH", &sensors_ref.eth, &mut sensors.eth);
         });
 
-        egui::CollapsingHeader::new("Ignition").default_open(true).show(ui, |ui| {
-            let ignition = &mut config.ignition.get_or_insert_default();
-
-            let mut dwelltype = ignition.r#type();
-            let dwelltext = match dwelltype {
-                interface::configuration::ignition::DwellType::DwellFixedDuty => "Fixed Duty",
-                interface::configuration::ignition::DwellType::DwellFixedTime => "Fixed Time",
-                interface::configuration::ignition::DwellType::DwellBrv => "Battery Voltage",
-            };
+        
+        let ignition = local_config.ignition.get_or_insert_default();
+        let ignition_ref = live_config.ignition.clone().unwrap_or_default();
+        egui::CollapsingHeader::new(red_if_changed(&ignition_ref, ignition, "Ignition")).show(ui, |ui| {
 
 
-            ui.horizontal(|ui| {
-                ui.label("Dwell Source");
-                egui::ComboBox::from_id_salt("dwelltype")
-                    .selected_text(dwelltext)
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut dwelltype,
-                            interface::configuration::ignition::DwellType::DwellFixedDuty,
-                            "Fixed Duty");
-                        ui.selectable_value(&mut dwelltype,
-                            interface::configuration::ignition::DwellType::DwellFixedTime,
-                            "Fixed Time");
-                        ui.selectable_value(&mut dwelltype,
-                            interface::configuration::ignition::DwellType::DwellBrv,
-                            "Battery Voltage");
+            render_enum_selector(ui, 
+                ignition_ref.r#type, 
+                &mut ignition.r#type, 
+                "Dwell Type",
+                &[
+                (interface::configuration::ignition::DwellType::DwellFixedDuty, "Fixed Duty"),
+                (interface::configuration::ignition::DwellType::DwellFixedTime, "Fixed Time"),
+                (interface::configuration::ignition::DwellType::DwellBrv, "Battery Voltage"),
+                ]);
 
-                    });
-                ignition.r#type = Some(dwelltype as i32);
-            });
-
-            match dwelltype {
+            match ignition.r#type() {
                 interface::configuration::ignition::DwellType::DwellFixedDuty => {
-                    ui.horizontal(|ui| {
-                        ui.label("Dwell Duty %");
-                        ui.add(egui::DragValue::new(ignition.fixed_duty.get_or_insert_default())
-                            .update_while_editing(false));
-                        });
+                    render_single_optional_value_input(ui, &ignition_ref.fixed_duty, &mut ignition.fixed_duty, "Dwell Duty (%)");
                 }
                 interface::configuration::ignition::DwellType::DwellFixedTime => {
-                    ui.horizontal(|ui| {
-                        ui.label("Dwell Time (uS)");
-                        ui.add(egui::DragValue::new(ignition.fixed_dwell.get_or_insert_default())
-                            .update_while_editing(false));
-                            });
+                    render_single_optional_value_input(ui, &ignition_ref.fixed_dwell, &mut ignition.fixed_dwell, "Dwell Time (uS)");
                 }
                 interface::configuration::ignition::DwellType::DwellBrv => {
-                    egui::CollapsingHeader::new("Dwell").default_open(false).show(ui, |ui| {
+                    egui::CollapsingHeader::new("Dwell").show(ui, |ui| {
                         Table1dEditor::new().show(ui, ignition.dwell.get_or_insert_default());
                         
                     });
@@ -320,47 +319,32 @@ pub fn render_config_pane(ui: &mut egui::Ui, config: &mut interface::Configurati
                 }
             }
 
-            ui.horizontal(|ui| {
-                ui.label("Ignitions per cycle");
-                ui.add(egui::DragValue::new(ignition.ignitions_per_cycle.get_or_insert_default())
-                    .update_while_editing(false)
-                    .range(1..=8));
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("Coil cooldown (uS)");
-                ui.add(egui::DragValue::new(ignition.min_coil_cooldown_us.get_or_insert_default())
-                    .update_while_editing(false));
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("Minimum Dwell");
-                ui.add(egui::DragValue::new(ignition.min_dwell_us.get_or_insert_default())
-                    .update_while_editing(false));
-
-            });
+            render_single_optional_value_input(ui, &ignition_ref.ignitions_per_cycle, &mut ignition.ignitions_per_cycle, "Ignitions per cycle");
+            render_single_optional_value_input(ui, &ignition_ref.min_coil_cooldown_us, &mut ignition.min_coil_cooldown_us, "Coil cooldown (uS)");
+            render_single_optional_value_input(ui, &ignition_ref.min_dwell_us, &mut ignition.min_dwell_us, "Minimum Dwell (uS)");
 
             egui::CollapsingHeader::new("Timing").show(ui, |ui| {
               Table2dEditor::new().show(ui, ignition.timing.get_or_insert_default());
             });
         });
 
-        egui::CollapsingHeader::new("Fueling").default_open(false).show(ui, |ui| {
-            let fueling = config.fueling.get_or_insert_default();
+        let fueling = local_config.fueling.get_or_insert_default();
+        let fueling_ref = live_config.fueling.clone().unwrap_or_default();
+        egui::CollapsingHeader::new(red_if_changed(&fueling_ref, fueling, "Fueling")).show(ui, |ui| {
+            render_single_optional_value_input(ui, &fueling_ref.fuel_pump_pin, &mut fueling.fuel_pump_pin, "Fuelpump pin");
+            render_single_optional_value_input(ui, &fueling_ref.cylinder_cc, &mut fueling.cylinder_cc, "Cylinder CC");
+            render_single_optional_value_input(ui, &fueling_ref.fuel_density, &mut fueling.fuel_density, "Fuel Density");
+            render_single_optional_value_input(ui, &fueling_ref.fuel_stoich_ratio, &mut fueling.fuel_stoich_ratio, "Fuel Stoich Ratio");
+            render_single_optional_value_input(ui, &fueling_ref.injections_per_cycle, &mut fueling.injections_per_cycle, "Injections per cycle");
+            render_single_optional_value_input(ui, &fueling_ref.injector_cc, &mut fueling.injector_cc, "Injector CC/min");
+            render_single_optional_value_input(ui, &fueling_ref.max_duty_cycle, &mut fueling.max_duty_cycle, "Max Duty Cycle (%)");
 
-            render_single_value_input(ui, fueling.fuel_pump_pin.get_or_insert_default(), "Fuelpump pin");
-            render_single_value_input(ui, fueling.cylinder_cc.get_or_insert_default(), "Cylinder CC");
-            render_single_value_input(ui, fueling.fuel_density.get_or_insert_default(), "Fuel Density");
-            render_single_value_input(ui, fueling.fuel_stoich_ratio.get_or_insert_default(), "Fuel Stoich Ratio");
-            render_single_value_input(ui, fueling.injections_per_cycle.get_or_insert_default(), "Injections per cycle");
-            render_single_value_input(ui, fueling.injector_cc.get_or_insert_default(), "Injector CC/min");
-            render_single_value_input(ui, fueling.max_duty_cycle.get_or_insert_default(), "Max Duty Cycle (%)");
-
-            egui::CollapsingHeader::new("Cranking Enrichment").default_open(true).show(ui, |ui| {
-                let ce = fueling.crank_enrich.get_or_insert_default();
-                render_single_value_input(ui, ce.cranking_rpm.get_or_insert_default(), "Upper Cranking RPM");
-                render_single_value_input(ui, ce.cranking_temp.get_or_insert_default(), "Upper Temp Threshold");
-                render_single_value_input(ui, ce.enrich_amt.get_or_insert_default(), "Multiplier");
+            let ce = fueling.crank_enrich.get_or_insert_default();
+            let ce_ref = fueling_ref.crank_enrich.clone().unwrap_or_default();
+            egui::CollapsingHeader::new(red_if_changed(&ce_ref, ce, "Cranking Enrichment")).default_open(true).show(ui, |ui| {
+                render_single_optional_value_input(ui, &ce_ref.cranking_rpm, &mut ce.cranking_rpm, "Upper Cranking RPM");
+                render_single_optional_value_input(ui, &ce_ref.cranking_temp, &mut ce.cranking_temp, "Upper Temp Threshold");
+                render_single_optional_value_input(ui, &ce_ref.enrich_amt, &mut ce.enrich_amt, "Multiplier");
             });
 
             egui::CollapsingHeader::new("Pulse Width Compensation").show(ui, |ui| {
@@ -392,76 +376,55 @@ pub fn render_config_pane(ui: &mut egui::Ui, config: &mut interface::Configurati
             });
         });
 
-        egui::CollapsingHeader::new("Decoder").default_open(true).show(ui, |ui| {
-            let decoder = config.decoder.get_or_insert_default();
+        let decoder = local_config.decoder.get_or_insert_default();
+        let decoder_ref = live_config.decoder.clone().unwrap_or_default();
+        egui::CollapsingHeader::new(red_if_changed(&decoder_ref, decoder, "Decoder")).show(ui, |ui| {
+            render_enum_selector(ui, 
+                decoder.trigger_type,
+                &mut decoder.trigger_type,
+                "Trigger wheel type",
+                &[
+                (interface::configuration::TriggerType::DecoderDisabled, "Disabled"),
+                (interface::configuration::TriggerType::EvenTeeth, "Even Teeth"),
+                (interface::configuration::TriggerType::EvenTeethPlusCamsync, "Even Teeth and Cam"),
+                (interface::configuration::TriggerType::MissingTooth, "Missing Tooth"),
+                (interface::configuration::TriggerType::MissingToothPlusCamsync, "Missing Tooth and Cam"),
+                ]);
 
-            ui.horizontal(|ui| {
-                ui.label("Trigger wheel type");
-
-                let mut decoder_type = decoder.trigger_type();
-                let decoder_text = match decoder_type {
-                    interface::configuration::TriggerType::DecoderDisabled => "Disabled",
-                    interface::configuration::TriggerType::EvenTeeth => "Even Teeth",
-                    interface::configuration::TriggerType::EvenTeethPlusCamsync => "Even Teeth and Cam",
-                    interface::configuration::TriggerType::MissingTooth => "Missing Tooth",
-                    interface::configuration::TriggerType::MissingToothPlusCamsync => "Missing Tooth and Cam",
-                };
-
-                egui::ComboBox::from_id_salt("decodertype")
-                    .selected_text(decoder_text)
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut decoder_type,
-                            interface::configuration::TriggerType::DecoderDisabled,
-                            "Disabled");
-                        ui.selectable_value(&mut decoder_type,
-                            interface::configuration::TriggerType::EvenTeeth,
-                            "Even Teeth");
-                        ui.selectable_value(&mut decoder_type,
-                            interface::configuration::TriggerType::EvenTeethPlusCamsync,
-                            "Even Teeth and Cam");
-                        ui.selectable_value(&mut decoder_type,
-                            interface::configuration::TriggerType::MissingTooth,
-                            "Missing Tooth");
-                        ui.selectable_value(&mut decoder_type,
-                            interface::configuration::TriggerType::MissingToothPlusCamsync,
-                            "Missing Tooth and Cam");
-
-                    });
-                decoder.trigger_type = Some(decoder_type as i32);
-            });
-
-            render_single_value_input(ui, decoder.degrees_per_trigger.get_or_insert_default(), "Degrees per trigger");
-            render_single_value_input(ui, decoder.max_tooth_variance.get_or_insert_default(), "Max tooth variance");
-            render_single_value_input(ui, decoder.min_rpm.get_or_insert_default(), "Minimum RPM");
-            render_single_value_input(ui, decoder.num_triggers.get_or_insert_default(), "Trigger count");
-            render_single_value_input(ui, decoder.offset.get_or_insert_default(), "Offset");
+            render_single_optional_value_input(ui, &decoder_ref.degrees_per_trigger, &mut decoder.degrees_per_trigger, "Degrees per trigger");
+            render_single_optional_value_input(ui, &decoder_ref.max_tooth_variance, &mut decoder.max_tooth_variance, "Max tooth variance");
+            render_single_optional_value_input(ui, &decoder_ref.min_rpm, &mut decoder.min_rpm, "Minimum RPM");
+            render_single_optional_value_input(ui, &decoder_ref.num_triggers, &mut decoder.num_triggers, "Trigger count");
+            render_single_optional_value_input(ui, &decoder_ref.offset, &mut decoder.offset, "Offset");
         });
 
-        egui::CollapsingHeader::new("Misc").default_open(true).show(ui, |ui| {
-            egui::CollapsingHeader::new("Rpm Cut").default_open(true).show(ui, |ui| {
-                let rpm_cut = config.rpm_cut.get_or_insert_default();
-                render_single_value_input(ui, rpm_cut.rpm_limit_start.get_or_insert_default(), "RPM Lower Hysteresis");
-                render_single_value_input(ui, rpm_cut.rpm_limit_stop.get_or_insert_default(), "RPM Upper Hysteresis");
-            });
+        let rpm_cut = local_config.rpm_cut.get_or_insert_default();
+        let rpm_cut_ref = live_config.rpm_cut.clone().unwrap_or_default();
+        egui::CollapsingHeader::new(red_if_changed(&rpm_cut_ref, &rpm_cut, "Rpm Cut")).show(ui, |ui| {
+            render_single_optional_value_input(ui, &rpm_cut_ref.rpm_limit_start, &mut rpm_cut.rpm_limit_start, "RPM Lower Hysteresis");
+            render_single_optional_value_input(ui, &rpm_cut_ref.rpm_limit_stop, &mut rpm_cut.rpm_limit_stop, "RPM Upper Hysteresis");
+        });
 
-            egui::CollapsingHeader::new("Check Engine Light").default_open(true).show(ui, |ui| {
-                let cel = config.cel.get_or_insert_default();
-                render_single_value_input(ui, cel.pin.get_or_insert_default(), "Pin");
-                render_single_value_input(ui, cel.lean_boost_ego.get_or_insert_default(), "Max EGO-in-boost");
-                render_single_value_input(ui, cel.lean_boost_map_enable.get_or_insert_default(), "EGO-in-boost MAP threshold (kpa)");
-            });
+        let cel = local_config.cel.get_or_insert_default();
+        let cel_ref = live_config.cel.clone().unwrap_or_default();
+        egui::CollapsingHeader::new(red_if_changed(&cel_ref, &cel, "Check Engine Light")).show(ui, |ui| {
+            render_single_optional_value_input(ui, &cel_ref.pin, &mut cel.pin, "Pin");
+            render_single_optional_value_input(ui, &cel_ref.lean_boost_ego, &mut cel.lean_boost_ego, "Max EGO-in-boost");
+            render_single_optional_value_input(ui, &cel_ref.lean_boost_map_enable, &mut cel.lean_boost_map_enable, "EGO-in-boost MAP threshold (kpa)");
+        });
 
-            egui::CollapsingHeader::new("Boost Control").default_open(true).show(ui, |ui| {
-                let boost = config.boost_control.get_or_insert_default();
-                render_single_value_input(ui, boost.pin.get_or_insert_default(), "Pin");
-                render_single_value_input(ui, boost.control_threshold_map.get_or_insert_default(), "Lower MAP threshold (kpa)");
-                render_single_value_input(ui, boost.control_threshold_tps.get_or_insert_default(), "Lower TPS threshold (%)");
-                render_single_value_input(ui, boost.enable_threshold_map.get_or_insert_default(), "Enable MAP threshold (kpa)");
-                render_single_value_input(ui, boost.overboost_map.get_or_insert_default(), "Overboost limit (kpa)");
-                egui::CollapsingHeader::new("PWM vs RPM").default_open(false).show(ui, |ui| {
-                    Table1dEditor::new().show(ui, boost.pwm_vs_rpm.get_or_insert_default());
+        let boost = local_config.boost_control.get_or_insert_default();
+        let boost_ref = live_config.boost_control.clone().unwrap_or_default();
+        egui::CollapsingHeader::new(red_if_changed(&boost_ref, &boost, "Boost Control")).show(ui, |ui| {
+            render_single_optional_value_input(ui, &boost_ref.pin, &mut boost.pin, "Pin");
+            render_single_optional_value_input(ui, &boost_ref.control_threshold_map, &mut boost.control_threshold_map, "Lower MAP threshold (kpa)");
+            render_single_optional_value_input(ui, &boost_ref.control_threshold_tps, &mut boost.control_threshold_tps, "Lower TPS threshold (%)");
+            render_single_optional_value_input(ui, &boost_ref.enable_threshold_map, &mut boost.enable_threshold_map, "Enable MAP threshold (kpa)");
+            render_single_optional_value_input(ui, &boost_ref.overboost_map, &mut boost.overboost_map, "Overboost limit (kpa)");
 
-                });
+            egui::CollapsingHeader::new("PWM vs RPM").show(ui, |ui| {
+                Table1dEditor::new().show(ui, boost.pwm_vs_rpm.get_or_insert_default());
+
             });
 
         });
