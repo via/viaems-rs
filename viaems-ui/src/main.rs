@@ -236,6 +236,11 @@ fn main() -> Result<(), eframe::Error> {
             });
         }
 
+        if let Some(live_config) = &*state.live_configuration.lock().unwrap() &&
+               state.desired_configuration.is_none() {
+            // If we just connected to a target, lets reset our desired state 
+            state.desired_configuration = Some(live_config.clone());
+        }
         if let Some(config) = &mut state.desired_configuration {
             egui::SidePanel::right("right panel").show(ctx, |ui| {
                 ui.horizontal(|ui| {
