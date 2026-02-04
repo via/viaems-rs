@@ -6,6 +6,8 @@ fn main() -> Result<()> {
     config.type_attribute("viaems.console.Sensors", "#[derive(viaems_interface_derive::LoggableStruct)]");
     config.type_attribute("viaems.console.Position", "#[derive(viaems_interface_derive::LoggableStruct)]");
     config.type_attribute("viaems.console.Calculations", "#[derive(viaems_interface_derive::LoggableStruct)]");
+    config.type_attribute(".",
+                      "#[derive(serde::Serialize, serde::Deserialize)] #[serde(rename_all = \"snake_case\")]");
     config.compile_protos(&["src/console.proto"], &["src/"])?;
     Ok(())
 }

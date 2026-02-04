@@ -208,7 +208,7 @@ pub fn render_config_pane(ui: &mut egui::Ui, live_config: &interface::Configurat
                         ui.checkbox(&mut inverted, "");
                         output.inverted = Some(inverted);
 
-                        if *output != live_config.outputs[idx] {
+                        if idx < live_config.outputs.len() && *output != live_config.outputs[idx] {
                             if ui.button(egui::RichText::new("↺").color(egui::Color32::RED)).clicked() {
                                 *output = live_config.outputs[idx].clone();
                             }
@@ -281,7 +281,7 @@ pub fn render_config_pane(ui: &mut egui::Ui, live_config: &interface::Configurat
                             });
                         trigger.edge = Some(edgevalue as i32);
 
-                        if *trigger != live_config.triggers[idx] {
+                        if idx < live_config.triggers.len() &&  *trigger != live_config.triggers[idx] {
                             if ui.button(egui::RichText::new("↺").color(egui::Color32::RED)).clicked() {
                                 *trigger = live_config.triggers[idx].clone();
                             }

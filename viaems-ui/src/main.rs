@@ -2,10 +2,9 @@
 
 use clap::Parser;
 use egui_file::FileDialog;
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::io::{Write, Read};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 use viaems::{self, connection, interface};
 
 mod log_view;
@@ -29,15 +28,16 @@ struct Application {
     desired_configuration: Option<interface::Configuration>,
     view_cache: Arc<Mutex<view_cache::ViewCache>>,
     logview: log_view::LogViewer,
-    file_dialog: FileDialog,
-
     last_update_time: SystemTime,
+
+    open_logfile_dialog: FileDialog,
+    save_config_dialog: FileDialog,
+    load_config_dialog: FileDialog,
 }
 
 impl<'a> Application {
     fn new() -> Application {
         let feed = Arc::new(Mutex::new(FeedState::default()));
-        let dialog = FileDialog::open_file();
         let cache = Arc::new(Mutex::new(view_cache::ViewCache::new()));
 
         Application {
@@ -48,7 +48,9 @@ impl<'a> Application {
             desired_configuration: None,
             logview: log_view::LogViewer::new(cache.clone()),
             view_cache: cache,
-            file_dialog: dialog,
+            open_logfile_dialog: FileDialog::open_file(),
+            save_config_dialog: FileDialog::save_file(),
+            load_config_dialog: FileDialog::open_file(),
             last_update_time: SystemTime::now(),
         }
     }
@@ -167,28 +169,59 @@ fn main() -> Result<(), eframe::Error> {
         let mut should_reload = false;
         state.last_update_time = now;
 
+        if state.open_logfile_dialog.show(ctx).selected() {
+            if let Some(path) = state.open_logfile_dialog.path() {
+                let path = path.to_path_buf();
+                state.open_log(path.to_str().unwrap());
+            }
+        }
+
+        if state.save_config_dialog.show(ctx).selected() {
+            if let Some(path) = state.save_config_dialog.path() &&
+               let Ok(mut file) = std::fs::File::create(path) &&
+               let Some(config) = &state.desired_configuration {
+
+                   file.write_all(serde_json::to_string_pretty(config).unwrap().as_bytes()).unwrap();
+            }
+        }
+
+        if state.load_config_dialog.show(ctx).selected() {
+            if let Some(path) = state.load_config_dialog.path() &&
+               let Ok(mut file) = std::fs::File::open(path) {
+                   let mut contents = vec![];
+                   file.read_to_end(&mut contents).unwrap();
+                   state.desired_configuration = Some(serde_json::from_slice(contents.as_slice()).unwrap_or_default());
+            }
+        }
+
         egui::TopBottomPanel::top("Menubar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("Log", |ui| {
                     if ui.button("Open log").clicked() {
-                        state.file_dialog.open();
-                        ui.close_menu();
+                        state.open_logfile_dialog.open();
+                        ui.close();
                     }
                 });
-                if state.file_dialog.show(ctx).selected() {
-                    if let Some(path) = state.file_dialog.path() {
-                        let path = path.to_path_buf();
-                        state.open_log(path.to_str().unwrap());
-                    }
-                }
                 ui.menu_button("Target", |ui| {
                     if ui.button("Open UDP").clicked() {
                         state.connect_udp();
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui.button("Open Sim").clicked() {
                         state.connect_exec();
-                        ui.close_menu();
+                        ui.close();
+                    }
+                });
+                ui.menu_button("Config", |ui| {
+                    if ui.button("Import from JSON").clicked() {
+                        state.load_config_dialog.open();
+                        ui.close();
+                    }
+                    if state.desired_configuration.is_some() {
+                        if ui.button("Export to JSON").clicked() {
+                            state.save_config_dialog.open();
+                            ui.close();
+                        } 
                     }
                 });
             });
@@ -201,9 +234,10 @@ fn main() -> Result<(), eframe::Error> {
                     let latest_feed = state.latest_feed.lock().unwrap().update.clone();
                     live_status::render_status_pane(ui, &latest_feed);
             });
+        }
 
+        if let Some(config) = &mut state.desired_configuration {
             egui::SidePanel::right("right panel").show(ctx, |ui| {
-
                 ui.horizontal(|ui| {
                     if ui.button("Save").clicked() {
                         if let Some(target) = &state.target {
@@ -211,7 +245,7 @@ fn main() -> Result<(), eframe::Error> {
                                 id: 1,
                                 request: Some(interface::request::Request::Setconfig(
                                         interface::request::SetConfig{
-                                          config: state.desired_configuration.clone()
+                                          config: Some(config.clone())
                                         }
                                 )),
                             };
@@ -228,18 +262,21 @@ fn main() -> Result<(), eframe::Error> {
                     }
                     let mut autosave = false;
                     ui.checkbox(&mut autosave, "Autosave");
-                    if ui.button("Revert").clicked() {
-                        let latest_config = state.live_configuration.lock().unwrap();
-                        state.desired_configuration = latest_config.clone();
+                    if let Some(live_config) = &*state.live_configuration.lock().unwrap() {
+                        if ui.button("Revert").clicked() {
+                            *config = live_config.clone();
+                        }
                     }
                 });
 
                 ui.separator();
-                let latest_config = state.live_configuration.lock().unwrap();
-                if let Some(config) = &*latest_config {
-                    let desired = state.desired_configuration.get_or_insert(config.clone());
-                    config_pane::render_config_pane(ui, config, desired);
-                }
+                let live_config = state.live_configuration.lock().unwrap();
+                let config_ref = if let Some(c) = &*live_config { 
+                    c 
+                } else { 
+                    &interface::Configuration::default() 
+                };
+                config_pane::render_config_pane(ui, config_ref, config);
             });
         }
         egui::TopBottomPanel::bottom("Status").show(ctx, |ui| {
