@@ -54,6 +54,26 @@ fn render_enum_selector<T: PartialEq + Copy>(ui: &mut egui::Ui, reference: Optio
     });
 }
 
+fn render_table1d(ui: &mut egui::Ui, 
+                  reference: &interface::configuration::Table1d,
+                  field: &mut interface::configuration::Table1d,
+                  name: &str) {
+    egui::CollapsingHeader::new(red_if_changed(reference, field, name)).show(ui, |ui| {
+        Table1dEditor::new().show(ui, field);
+    });
+
+}
+
+fn render_table2d(ui: &mut egui::Ui, 
+                  reference: &interface::configuration::Table2d,
+                  field: &mut interface::configuration::Table2d,
+                  name: &str) {
+    egui::CollapsingHeader::new(red_if_changed(reference, field, name)).show(ui, |ui| {
+        Table2dEditor::new().show(ui, field);
+    });
+
+}
+
 fn red_if_changed<T: PartialEq>(reference: &T, local: &T, text: &str) -> egui::RichText {
     if reference == local {
         egui::RichText::new(text)
@@ -311,11 +331,9 @@ pub fn render_config_pane(ui: &mut egui::Ui, live_config: &interface::Configurat
                     render_single_optional_value_input(ui, &ignition_ref.fixed_dwell, &mut ignition.fixed_dwell, "Dwell Time (uS)");
                 }
                 interface::configuration::ignition::DwellType::DwellBrv => {
-                    egui::CollapsingHeader::new("Dwell").show(ui, |ui| {
-                        Table1dEditor::new().show(ui, ignition.dwell.get_or_insert_default());
-                        
-                    });
-                    
+                    let dwell = ignition.dwell.get_or_insert_default();
+                    let dwell_ref = ignition_ref.dwell.unwrap_or_default();
+                    render_table1d(ui, &dwell_ref, dwell, "Dwell");
                 }
             }
 
@@ -323,9 +341,9 @@ pub fn render_config_pane(ui: &mut egui::Ui, live_config: &interface::Configurat
             render_single_optional_value_input(ui, &ignition_ref.min_coil_cooldown_us, &mut ignition.min_coil_cooldown_us, "Coil cooldown (uS)");
             render_single_optional_value_input(ui, &ignition_ref.min_dwell_us, &mut ignition.min_dwell_us, "Minimum Dwell (uS)");
 
-            egui::CollapsingHeader::new("Timing").show(ui, |ui| {
-              Table2dEditor::new().show(ui, ignition.timing.get_or_insert_default());
-            });
+            let timing = ignition.timing.get_or_insert_default();
+            let timing_ref = ignition_ref.timing.unwrap_or_default();
+            render_table2d(ui, &timing_ref, timing, "Timing");
         });
 
         let fueling = local_config.fueling.get_or_insert_default();
@@ -347,33 +365,34 @@ pub fn render_config_pane(ui: &mut egui::Ui, live_config: &interface::Configurat
                 render_single_optional_value_input(ui, &ce_ref.enrich_amt, &mut ce.enrich_amt, "Multiplier");
             });
 
-            egui::CollapsingHeader::new("Pulse Width Compensation").show(ui, |ui| {
-                Table1dEditor::new().show(ui, fueling.pulse_width_compensation.get_or_insert_default());
-            });
+            let pwc = fueling.pulse_width_compensation.get_or_insert_default();
+            let pwc_ref = fueling_ref.pulse_width_compensation.unwrap_or_default();
+            render_table1d(ui, &pwc_ref, pwc, "Pulse Width Compensation");
 
-            egui::CollapsingHeader::new("Injector Dead Time").show(ui, |ui| {
-                Table1dEditor::new().show(ui, fueling.injector_dead_time.get_or_insert_default());
-            });
+            let idt = fueling.injector_dead_time.get_or_insert_default();
+            let idt_ref = fueling_ref.injector_dead_time.unwrap_or_default();
+            render_table1d(ui, &idt_ref, idt, "Injector Dead Time");
 
-            egui::CollapsingHeader::new("Engine Temp Enrichment").show(ui, |ui| {
-                Table2dEditor::new().show(ui, fueling.engine_temp_enrichment.get_or_insert_default());
-            });
+            let ete = fueling.engine_temp_enrichment.get_or_insert_default();
+            let ete_ref = fueling_ref.engine_temp_enrichment.unwrap_or_default();
+            render_table2d(ui, &ete_ref, ete, "Engine Temp Enrichment");
 
-            egui::CollapsingHeader::new("VE").show(ui, |ui| {
-                Table2dEditor::new().show(ui, fueling.ve.get_or_insert_default());
-            });
+            let ve = fueling.ve.get_or_insert_default();
+            let ve_ref = fueling_ref.ve.unwrap_or_default();
+            render_table2d(ui, &ve_ref, ve, "VE");
 
-            egui::CollapsingHeader::new("Lambda").show(ui, |ui| {
-                Table2dEditor::new().show(ui, fueling.commanded_lambda.get_or_insert_default());
-            });
+            let lambda = fueling.commanded_lambda.get_or_insert_default();
+            let lambda_ref = fueling_ref.commanded_lambda.unwrap_or_default();
+            render_table2d(ui, &lambda_ref, lambda, "Lambda");
 
-            egui::CollapsingHeader::new("Tipin Amount").show(ui, |ui| {
-                Table2dEditor::new().show(ui, fueling.tipin_enrich_amount.get_or_insert_default());
-            });
+            let tipin_amt = fueling.tipin_enrich_amount.get_or_insert_default();
+            let tipin_amt_ref = fueling_ref.tipin_enrich_amount.unwrap_or_default();
+            render_table2d(ui, &tipin_amt_ref, tipin_amt, "Tipin Amount");
 
-            egui::CollapsingHeader::new("Tipin Duration").show(ui, |ui| {
-                Table1dEditor::new().show(ui, fueling.tipin_enrich_duration.get_or_insert_default());
-            });
+            let tipin_duration = fueling.tipin_enrich_duration.get_or_insert_default();
+            let tipin_duration_ref = fueling_ref.tipin_enrich_duration.unwrap_or_default();
+            render_table1d(ui, &tipin_duration_ref, tipin_duration, "Tipin Duration");
+
         });
 
         let decoder = local_config.decoder.get_or_insert_default();
@@ -422,10 +441,9 @@ pub fn render_config_pane(ui: &mut egui::Ui, live_config: &interface::Configurat
             render_single_optional_value_input(ui, &boost_ref.enable_threshold_map, &mut boost.enable_threshold_map, "Enable MAP threshold (kpa)");
             render_single_optional_value_input(ui, &boost_ref.overboost_map, &mut boost.overboost_map, "Overboost limit (kpa)");
 
-            egui::CollapsingHeader::new("PWM vs RPM").show(ui, |ui| {
-                Table1dEditor::new().show(ui, boost.pwm_vs_rpm.get_or_insert_default());
-
-            });
+            let pwm = boost.pwm_vs_rpm.get_or_insert_default();
+            let pwm_ref = boost_ref.pwm_vs_rpm.unwrap_or_default();
+            render_table1d(ui, &pwm_ref, pwm, "PWM vs RPM");
 
         });
     });

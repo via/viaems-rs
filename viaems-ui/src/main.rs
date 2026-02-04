@@ -97,7 +97,9 @@ impl<'a> Application {
             let feed_state = self.latest_feed.clone();
             let view = self.view_cache.clone();
             let logwriter : Option<viaems::UpdateWriter> = if let Some(reader) = &self.log {
-                Some(reader.get_writer().expect("Unable to create log writer"))
+                let writer = reader.get_writer().expect("Unable to create log writer");
+                self.logview.set_available_keys(&reader.keys().unwrap_or_default());
+                Some(writer)
             } else {
                 None 
             };
@@ -153,6 +155,8 @@ fn main() -> Result<(), eframe::Error> {
 
     if let Some(filename) = args.filename {
         state.open_log(&filename);
+    } else {
+        state.open_log(":memory:");
     }
 
     eframe::run_simple_native("Viaems UI", options, move |ctx, _frame| {
@@ -211,11 +215,9 @@ fn main() -> Result<(), eframe::Error> {
                                         }
                                 )),
                             };
-                            println!("SEND {:?}", req);
                             target.command(req, {
                                 let latest_config = state.live_configuration.clone();
                                 move |resp| {
-                                    println!("GOT");
                                     if let Some(response) = resp.response &&
                                         let interface::response::Response::Setconfig(config) = response {
                                             *latest_config.lock().unwrap() = config.config;

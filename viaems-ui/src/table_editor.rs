@@ -39,7 +39,6 @@ impl Table2dEditor {
                     for (col_idx, col) in row.values.iter_mut().enumerate() {
                         let field = egui::DragValue::new(col).update_while_editing(false);
                         if ui.add(field).changed() {
-                            println!("Changed {}:{} to {}", row_idx, col_idx, col);
                             modified = true;
                         }
 
