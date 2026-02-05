@@ -10,15 +10,27 @@ impl Table2dEditor {
         }
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui, table: &mut configuration::Table2d) -> bool {
+    pub fn show(&mut self, 
+                ui: &mut egui::Ui, 
+                reference: &configuration::Table2d,
+                table: &mut configuration::Table2d) -> bool {
         let mut modified = false;
 
         egui::Grid::new("table")
             .num_columns(table.cols.as_ref().unwrap().values.len() + 1)
             .striped(true)
             .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.menu_button("⚙", |ui| {
+                            let _ = ui.button("TODO");
+                        });
+                        if *reference != *table {
+                            if ui.button("↺").clicked() {
+                                *table = reference.clone();
+                            }
+                        }
+                    });
                 if let Some(cols) = &table.cols {
-                    ui.label("   ");
                     for val in &cols.values {
                         let value = format!("{:3}", val);
                         ui.label(value);
@@ -37,7 +49,8 @@ impl Table2dEditor {
                     ui.label(row_label_str);
 
                     for (col_idx, col) in row.values.iter_mut().enumerate() {
-                        let field = egui::DragValue::new(col).update_while_editing(false);
+                        let field = egui::DragValue::new(col)
+                            .update_while_editing(false);
                         if ui.add(field).changed() {
                             modified = true;
                         }
@@ -62,13 +75,27 @@ impl Table1dEditor {
         }
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui, table: &mut configuration::Table1d) -> bool {
+    pub fn show(&mut self, 
+                ui: &mut egui::Ui, 
+                reference: &configuration::Table1d,
+                table: &mut configuration::Table1d) -> bool {
         let mut modified = false;
 
         egui::Grid::new("table")
             .num_columns(2)
             .striped(true)
             .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    if ui.button("⚙").clicked() {
+                    }
+                    if *reference != *table {
+                        if ui.button("↺").clicked() {
+                            *table = reference.clone();
+                        }
+                    }
+                });
+                ui.label(table.cols.get_or_insert_default().name.clone().unwrap_or("Value".to_string()));
+                ui.end_row();
                 let cols = table.data.get_or_insert_default();
                 for (col_idx, col) in cols.values.iter_mut().enumerate() {
                     let col_label = if let Some(colaxis) = &table.cols {

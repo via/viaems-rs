@@ -59,7 +59,7 @@ fn render_table1d(ui: &mut egui::Ui,
                   field: &mut interface::configuration::Table1d,
                   name: &str) {
     egui::CollapsingHeader::new(red_if_changed(reference, field, name)).show(ui, |ui| {
-        Table1dEditor::new().show(ui, field);
+        Table1dEditor::new().show(ui, reference, field);
     });
 
 }
@@ -69,7 +69,7 @@ fn render_table2d(ui: &mut egui::Ui,
                   field: &mut interface::configuration::Table2d,
                   name: &str) {
     egui::CollapsingHeader::new(red_if_changed(reference, field, name)).show(ui, |ui| {
-        Table2dEditor::new().show(ui, field);
+        Table2dEditor::new().show(ui, reference, field);
     });
 
 }

@@ -180,8 +180,8 @@ fn main() -> Result<(), eframe::Error> {
             if let Some(path) = state.save_config_dialog.path() &&
                let Ok(mut file) = std::fs::File::create(path) &&
                let Some(config) = &state.desired_configuration {
-
-                   file.write_all(serde_json::to_string_pretty(config).unwrap().as_bytes()).unwrap();
+                   let encoded = prost::Message::encode_to_vec(config);
+                   file.write_all(encoded.as_slice()).expect("Failed to write config");
             }
         }
 
@@ -190,7 +190,7 @@ fn main() -> Result<(), eframe::Error> {
                let Ok(mut file) = std::fs::File::open(path) {
                    let mut contents = vec![];
                    file.read_to_end(&mut contents).unwrap();
-                   state.desired_configuration = Some(serde_json::from_slice(contents.as_slice()).unwrap_or_default());
+                   state.desired_configuration = prost::Message::decode(contents.as_slice()).ok();
             }
         }
 
@@ -213,12 +213,12 @@ fn main() -> Result<(), eframe::Error> {
                     }
                 });
                 ui.menu_button("Config", |ui| {
-                    if ui.button("Import from JSON").clicked() {
+                    if ui.button("Import config").clicked() {
                         state.load_config_dialog.open();
                         ui.close();
                     }
                     if state.desired_configuration.is_some() {
-                        if ui.button("Export to JSON").clicked() {
+                        if ui.button("Export config").clicked() {
                             state.save_config_dialog.open();
                             ui.close();
                         } 
@@ -279,7 +279,10 @@ fn main() -> Result<(), eframe::Error> {
                 let config_ref = if let Some(c) = &*live_config { 
                     c 
                 } else { 
-                    &interface::Configuration::default() 
+                    // We have a desired config but no live config, this should only happen from a
+                    // config import with no live target, so to make the UI cleaner lets make the
+                    // reference config a copy of our desired config
+                    &config.clone()
                 };
                 config_pane::render_config_pane(ui, config_ref, config);
             });
