@@ -419,7 +419,7 @@ pub fn render_config_pane(ui: &mut egui::Ui, live_config: &interface::Configurat
         let decoder_ref = live_config.decoder.clone().unwrap_or_default();
         egui::CollapsingHeader::new(red_if_changed(&decoder_ref, decoder, "Decoder")).show(ui, |ui| {
             render_enum_selector(ui, 
-                decoder.trigger_type,
+                decoder_ref.trigger_type,
                 &mut decoder.trigger_type,
                 "Trigger wheel type",
                 &[
