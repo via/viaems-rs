@@ -193,8 +193,8 @@ message Configuration {
     }
 
     message WindowConfig {
-      float capture_width = 1 ;
-      float total_width = 2;
+      float opening = 1 ;
+      uint32 count = 2;
       float offset = 3;
     }
 
@@ -299,7 +299,7 @@ message Configuration {
     optional float fixed_dwell = 2;
     optional float fixed_duty = 3;
 
-    optional float ignitions_per_cycle = 4; // TODO int?
+    optional uint32 ignitions_per_cycle = 4;
     optional uint32 min_coil_cooldown_us = 5;
     optional uint32 min_dwell_us = 6;
 
@@ -414,3 +414,5 @@ message Message {
     Response response = 5;
   }
 }
+
+

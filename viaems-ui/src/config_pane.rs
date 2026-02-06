@@ -134,8 +134,8 @@ fn render_sensor(ui: &mut egui::Ui, name: &str, live_sensor: &Option<interface::
                         let wc = sensor.window_config.get_or_insert_default();
                         let wc_ref = sensor_ref.window_config.unwrap_or_default();
 
-                        render_single_value_input(ui, &wc_ref.capture_width, &mut wc.capture_width, "Window Capture Opening");
-                        render_single_value_input(ui, &wc_ref.total_width, &mut wc.total_width, "Window Total Width");
+                        render_single_value_input(ui, &wc_ref.opening, &mut wc.opening, "Window Capture Opening");
+                        render_single_value_input(ui, &wc_ref.count, &mut wc.count, "Windows per cycle");
                         render_single_value_input(ui, &wc_ref.offset, &mut wc.offset, "Window Offset");
                     }
                 } else if sensor.method() == interface::configuration::SensorMethod::MethodThermistor {
