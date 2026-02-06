@@ -85,6 +85,7 @@ impl Table1dEditor {
             .num_columns(2)
             .striped(true)
             .show(ui, |ui| {
+                ui.label(table.cols.get_or_insert_default().name.clone().unwrap_or("Value".to_string()));
                 ui.horizontal(|ui| {
                     if ui.button("⚙").clicked() {
                     }
@@ -94,7 +95,6 @@ impl Table1dEditor {
                         }
                     }
                 });
-                ui.label(table.cols.get_or_insert_default().name.clone().unwrap_or("Value".to_string()));
                 ui.end_row();
                 let cols = table.data.get_or_insert_default();
                 for (col_idx, col) in cols.values.iter_mut().enumerate() {

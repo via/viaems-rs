@@ -1,56 +1,83 @@
 use std::sync::{mpsc, atomic, Arc};
 use std::time::{SystemTime, Duration};
+use std::io::Write;
+
+use futures_lite::future::{block_on, zip};
+use nusb::transfer::{ControlOut, Bulk, In, Out};
+use nusb::MaybeFuture;
+
 use crate::interface;
-use crate::connection::{Connection, ConnError, RxMessage, Writer};
-use rusb::{Context, UsbContext, Device};
-use rusb_async::TransferPool;
+use crate::connection::{Connection, RxMessage, stream};
 
 
 impl Connection {
     pub fn new_usb() -> Connection {
-        let context = Context::new().unwrap();
-        let devh = context.open_device_with_vid_pid(0x1209, 0x2041).expect("Could not open device");
-        for i in 0..=2 {
-            if devh.kernel_driver_active(i).unwrap() {
-                devh.detach_kernel_driver(i).expect("Could not detach kernel from device");
-            }
-        }
+        const VIAEMS_VID : u16 = 0x1209;
+        const VIAEMS_PID : u16 = 0x2041;
 
-        let devh = Arc::new(devh);
+        const USB_IN_EP : u8 = 0x81;
+        const USB_OUT_EP : u8 = 0x01;
+
+
+        let deviceinfo = nusb::list_devices()
+            .wait()
+            .unwrap()
+            .find(|d| d.vendor_id() == VIAEMS_VID && d.product_id() == VIAEMS_PID)
+            .expect("Unable to find device");
+
+        let device = deviceinfo.open().wait().unwrap();
+        let interface = device.detach_and_claim_interface(1).wait().unwrap();
+
+        // ViaEMS TinyUSB needs DTR to make the transmit buffer non-overwritable
+        interface.control_out(ControlOut {
+            control_type: nusb::transfer::ControlType::Class,
+            recipient: nusb::transfer::Recipient::Interface,
+            request: 0x22,
+            value: 3, // DTR | RTS
+            index: 0,
+            data: &[],
+        }, Duration::from_millis(100)).wait().unwrap();
+
+        let mut rx = interface.endpoint::<Bulk, In>(USB_IN_EP).unwrap()
+            .reader(1024)
+            .with_num_transfers(4)
+            .with_read_timeout(Duration::from_millis(100));
+
+        let mut tx = interface.endpoint::<Bulk, Out>(USB_OUT_EP).unwrap()
+            .writer(1024)
+            .with_num_transfers(4)
+            .with_write_timeout(Duration::from_millis(100));
+
         let running = Arc::new(atomic::AtomicBool::new(true));
 
         let (recv_tx, recv_rx) = mpsc::channel();
         let recv_thread = std::thread::spawn({
-            let mut pool = TransferPool::new(devh.clone()).expect("could not create pool");
             let running = running.clone();
+            let mut stream_reader = stream::StreamReader::new(rx);
             move || {
-                for _ in 1..=4 {
-                    let mut buf : Vec<u8> = vec![];
-                    buf.reserve(16384);
-                    pool.submit_bulk(0x81, buf).unwrap();
-                }
                 loop {
                     if !running.load(atomic::Ordering::Relaxed) {
                       break;
                     }
-                    match pool.poll(Duration::from_secs(1)) {
-                        Ok(bytes) => {
-//                            match serde_cbor::de::from_slice(&bytes[..]) {
-//                              Ok(payload) => {
-//                                let time = SystemTime::now();
-//                                if recv_tx.send(RxMessage{time, payload}).is_err() { break; }
-//                                pool.submit_bulk(0x81, bytes).unwrap();
-//                              },
-//                              Err(e) => {
-//                                  println!("Failed to decode! {e}");
-//                                  pool.submit_bulk(0x81, bytes).unwrap();
-//                              }
-//                            }
+                    match stream_reader.read() {
+                        Err(stream::Error::IOError(x)) => {
+                            println!("Failed to read from target: {}", x);
+                            break;
                         },
-                        Err(e) => {
-                          println!("Failed to poll: {e:?}"); 
-                        },
-                    }
+                        Err(stream::Error::FrameDecodeError) => continue,
+                        Ok(pdu) => {
+                            match prost::Message::decode(pdu.as_slice()) {
+                                Ok(message) => {
+                                    let time = SystemTime::now();
+                                    if recv_tx.send(RxMessage{time, message}).is_err() { break; }
+                                },
+                                Err(e) => {
+                                    println!("Failed to decode! {e}");
+                                    continue;
+                                },
+                            };
+                        }
+                    };
 
                 }
             }
@@ -65,9 +92,18 @@ impl Connection {
                       break;
                     }
                     match send_rx.recv_timeout(Duration::from_millis(100)) {
-                        Ok(msg) => {
-//                            let bytes = serde_cbor::to_vec(&msg).unwrap();
-//                            devh.write_bulk(0x01, &bytes[..], Duration::from_secs(1)).unwrap();
+                        Ok(command) => {
+                            let pdu = prost::Message::encode_to_vec(&command);
+                            let encoded = stream::write(pdu.as_slice()); 
+                            let mut position = 0;
+
+                            while position < encoded.len() {
+                                let written = tx.write(&encoded.as_slice()[position..]).unwrap();
+                                tx.flush_end().unwrap();
+                                println!("write {written}");
+                                position += written;
+                            }
+                            println!("Done");
                         }
                         Err(mpsc::RecvTimeoutError::Timeout) => continue,
                         _ => break,

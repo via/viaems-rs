@@ -55,45 +55,7 @@ impl<'a> Application {
         }
     }
 
-    fn open_log(&mut self, filename: &str) {
-        let log = viaems::Log::new(filename);
-
-        self.view_cache
-            .lock().unwrap()
-            .set_logreader(log.try_clone().expect("Unable to create logview reader"));
-        self.logview.set_available_keys(&log.keys().unwrap_or_default());
-        self.log = Some(log);
-        println!("Opening log");
-    }
-
-    fn connect_udp(&mut self) {
-        let devices = connection::udp::detect(connection::udp::DEFAULT_MCAST_ADDR, Some(Duration::from_millis(100)));
-        if devices.len() > 0 {
-            let conn = connection::Connection::new_udp(&devices[0]);
-            let target = viaems::Manager::new(conn);
-
-            let logwriter = if let Some(reader) = &self.log {
-                Some(reader.get_writer().expect("Unable to create log writer"))
-            } else {
-                None 
-            };
-
-            target.on_update({
-                let feed_state = self.latest_feed.clone();
-                move |time: SystemTime, update: &interface::EngineUpdate| {
-                    if let Some(w) = &logwriter {
-                        w.add(time, update.clone());
-                    }
-                    Application::update_feed(&feed_state, time, update);
-                }
-            });
-
-            self.target = Some(target);
-        }
-    }
-
-    fn connect_exec(&mut self) {
-        let conn = connection::Connection::new_exec("/home/via/dev/viaems/obj/hosted/bleh.sh");
+    fn set_target(&mut self, conn: connection::Connection) {
         let target = viaems::Manager::new(conn);
         target.on_update({
             let feed_state = self.latest_feed.clone();
@@ -131,6 +93,30 @@ impl<'a> Application {
         });
 
         self.target = Some(target);
+    }
+
+    fn open_log(&mut self, filename: &str) {
+        let log = viaems::Log::new(filename);
+
+        self.view_cache
+            .lock().unwrap()
+            .set_logreader(log.try_clone().expect("Unable to create logview reader"));
+        self.logview.set_available_keys(&log.keys().unwrap_or_default());
+        self.log = Some(log);
+        println!("Opening log");
+    }
+
+    fn connect_udp(&mut self) {
+    }
+    
+    fn connect_usb(&mut self) {
+        let conn = connection::Connection::new_usb();
+        self.set_target(conn);
+    }
+
+    fn connect_exec(&mut self) {
+        let conn = connection::Connection::new_exec("/home/via/dev/viaems/obj/hosted/bleh.sh");
+        self.set_target(conn);
     }
 
     fn update_feed(
@@ -207,6 +193,10 @@ fn main() -> Result<(), eframe::Error> {
                         state.connect_udp();
                         ui.close();
                     }
+                    if ui.button("Open USB").clicked() {
+                        state.connect_usb();
+                        ui.close();
+                    }
                     if ui.button("Open Sim").clicked() {
                         state.connect_exec();
                         ui.close();
@@ -270,6 +260,21 @@ fn main() -> Result<(), eframe::Error> {
                     if let Some(live_config) = &*state.live_configuration.lock().unwrap() {
                         if ui.button("Revert").clicked() {
                             *config = live_config.clone();
+                        }
+                    }
+                    if let Some(target) = &state.target {
+                        if ui.button("Flash").clicked() {
+                            let req = interface::Request {
+                                id: 1,
+                                request: Some(interface::request::Request::Flashconfig(
+                                        interface::request::FlashConfig{}
+                                )),
+                            };
+                            target.command(req, {
+                                move |resp| {
+                                    println!("Flash command received: {:?}", resp);
+                                }
+                            });
                         }
                     }
                 });

@@ -1,7 +1,7 @@
 use std::sync::{mpsc, atomic, Arc};
 use crate::connection::{stream, Connection, RxMessage};
 use crate::interface;
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, Duration};
