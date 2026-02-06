@@ -162,6 +162,23 @@ fn render_sensor(ui: &mut egui::Ui, name: &str, live_sensor: &Option<interface::
     });
 }
 
+fn render_knock_sensor(ui: &mut egui::Ui, name: &str, live_sensor: &Option<interface::configuration::KnockSensor>, sensor: &mut Option<interface::configuration::KnockSensor>) {
+    let sensor = sensor.get_or_insert_default();
+    let sensor_ref = live_sensor.clone().unwrap_or_default();
+
+    egui::CollapsingHeader::new(red_if_changed(&sensor_ref, sensor, name)).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(red_if_changed(&sensor_ref.enabled, &sensor.enabled, "Enabled"));
+            let enabled = sensor.enabled.get_or_insert_default();
+            ui.checkbox(enabled, "");
+        });
+        render_single_optional_value_input(ui, &sensor_ref.frequency, &mut sensor.frequency, "Frequency");
+        render_single_optional_value_input(ui, &sensor_ref.threshold, &mut sensor.threshold, "Threshold");
+
+    });
+
+}
+
 pub fn render_config_pane(ui: &mut egui::Ui, live_config: &interface::Configuration, local_config: &mut interface::Configuration) {
     egui::ScrollArea::vertical().show(ui, |ui| {
 
@@ -305,6 +322,9 @@ pub fn render_config_pane(ui: &mut egui::Ui, live_config: &interface::Configurat
             render_sensor(ui, "FRP", &sensors_ref.frp, &mut sensors.frp);
             render_sensor(ui, "FRT", &sensors_ref.frt, &mut sensors.frt);
             render_sensor(ui, "ETH", &sensors_ref.eth, &mut sensors.eth);
+
+            render_knock_sensor(ui, "Knock 1", &sensors_ref.knock1, &mut sensors.knock1);
+            render_knock_sensor(ui, "Knock 2", &sensors_ref.knock2, &mut sensors.knock2);
         });
 
         
