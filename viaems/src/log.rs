@@ -1,6 +1,6 @@
 use duckdb;
 use duckdb::arrow::array::RecordBatch;
-use duckdb::arrow::datatypes::{self, Schema, SchemaBuilder, SchemaRef};
+use duckdb::arrow::datatypes::SchemaRef;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, SystemTime};
@@ -258,13 +258,10 @@ impl Log {
         let projected_schema = SchemaRef::new(full_schema.project(&idxs)?);
         let mut stmt = self.conn.prepare(&query)?;
         let mut stream = stmt.stream_arrow([], projected_schema)?;
-        let mut count = 0;
 
         while let Some(batch) = stream.next() {
-            count += batch.num_rows();
             f(&batch);
         }
-        //println!("{:?} query: {}, {} rows", stop.duration_since(start).unwrap_or_default(), query, count);
         Ok(())
     }
 

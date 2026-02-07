@@ -4,7 +4,7 @@ use clap::Parser;
 use egui_file::FileDialog;
 use std::io::{Write, Read};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 use viaems::{self, connection, interface};
 
 mod log_view;

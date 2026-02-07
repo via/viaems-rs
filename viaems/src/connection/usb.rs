@@ -2,7 +2,6 @@ use std::sync::{mpsc, atomic, Arc};
 use std::time::{SystemTime, Duration};
 use std::io::Write;
 
-use futures_lite::future::{block_on, zip};
 use nusb::transfer::{ControlOut, Bulk, In, Out};
 use nusb::MaybeFuture;
 
@@ -38,7 +37,7 @@ impl Connection {
             data: &[],
         }, Duration::from_millis(100)).wait().unwrap();
 
-        let mut rx = interface.endpoint::<Bulk, In>(USB_IN_EP).unwrap()
+        let rx = interface.endpoint::<Bulk, In>(USB_IN_EP).unwrap()
             .reader(1024)
             .with_num_transfers(4)
             .with_read_timeout(Duration::from_millis(100));

@@ -68,7 +68,7 @@ impl Connection {
 
 
 mod stream {
-    use std::io::{BufRead, BufReader, Read, Write};
+    use std::io::{BufRead, BufReader, Read};
     pub enum Error {
         IOError(std::io::Error),
         FrameDecodeError,

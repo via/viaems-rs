@@ -1,13 +1,15 @@
 use std::net::UdpSocket;
 use std::thread;
 use std::sync::{mpsc, atomic, Arc};
-use std::time::{SystemTime, Duration};
+use std::time::Duration;
 use std::net::{Ipv4Addr, SocketAddrV4};
 
 use network_interface::{NetworkInterface, NetworkInterfaceConfig, Addr};
 
 use crate::interface;
 use crate::connection::{Connection, RxMessage};
+
+// TODO re-implement
 
 #[derive(Debug)]
 pub struct UdpDevice {
@@ -81,16 +83,14 @@ impl Connection {
     }
 }
 
-fn send_loop(socket: UdpSocket, running: Arc<atomic::AtomicBool>, addr: SocketAddrV4, rx: mpsc::Receiver<interface::Message>) {
+fn send_loop(_socket: UdpSocket, running: Arc<atomic::AtomicBool>, _addr: SocketAddrV4, rx: mpsc::Receiver<interface::Message>) {
     loop {
         if !running.load(atomic::Ordering::Relaxed) {
           break;
         }
 
         match rx.recv_timeout(Duration::from_millis(100)) {
-            Ok(msg) => {
-        //        let bytes = serde_cbor::to_vec(&msg).unwrap();
-        //        socket.send_to(&bytes[..], &addr).unwrap();
+            Ok(_msg) => {
             },
             Err(mpsc::RecvTimeoutError::Timeout) => (),
             _ => break,
@@ -98,7 +98,7 @@ fn send_loop(socket: UdpSocket, running: Arc<atomic::AtomicBool>, addr: SocketAd
     }
 }
 
-fn recv_loop(socket: UdpSocket, running: Arc<atomic::AtomicBool>, tx: mpsc::Sender<RxMessage>) {
+fn recv_loop(socket: UdpSocket, running: Arc<atomic::AtomicBool>, _tx: mpsc::Sender<RxMessage>) {
     socket.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
     let mut recvbuf = [0; 16384];
     loop {
@@ -108,12 +108,7 @@ fn recv_loop(socket: UdpSocket, running: Arc<atomic::AtomicBool>, tx: mpsc::Send
 
       let recvd = socket.recv_from(&mut recvbuf);
       match recvd {
-        Ok((n_bytes, _)) => {
-//          let n = serde_cbor::de::from_slice(&recvbuf[0..n_bytes]).unwrap();
-//          if tx.send(RxMessage{
-//              time: SystemTime::now(),
-//              payload: n,
-//          }).is_err() { break; }
+        Ok((_n_bytes, _)) => {
         },
         Err(e) => match e.kind() {
           std::io::ErrorKind::TimedOut => (),

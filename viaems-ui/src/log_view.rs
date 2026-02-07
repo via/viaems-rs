@@ -1,14 +1,9 @@
-use std::cell::RefCell;
-use std::fmt::Pointer;
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
 
 use chrono::DateTime;
 
-use eframe::egui::containers::Frame;
 use eframe::egui::{self, Pos2};
-use egui::{Align, Rect};
-use emath::RectTransform;
+use egui::Align;
 use epaint;
 
 use crate::view_cache::{self, Range};
@@ -294,7 +289,7 @@ impl egui_tiles::Behavior<Pane> for LogViewerBehavior {
     fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
-        tile_id: egui_tiles::TileId,
+        _tile_id: egui_tiles::TileId,
         pane: &mut Pane,
     ) -> egui_tiles::UiResponse {
         let bgcolor = egui::Color32::BLACK;

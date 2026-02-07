@@ -19,7 +19,7 @@ impl LoggableMessage for i32 {
     fn get_duckdb_value_list(&self) -> Vec<duckdb::types::Value> {
       vec![duckdb::types::Value::Int(*self)]
     }
-    fn get_f32_value_by_name(&self, name: &str) -> Option<f32> {
+    fn get_f32_value_by_name(&self, _name: &str) -> Option<f32> {
         Some(*self as f32)
     }
 }
@@ -31,7 +31,7 @@ impl LoggableMessage for f32 {
     fn get_duckdb_value_list(&self) -> Vec<duckdb::types::Value> {
       vec![duckdb::types::Value::Float(*self)]
     }
-    fn get_f32_value_by_name(&self, name: &str) -> Option<f32> {
+    fn get_f32_value_by_name(&self, _name: &str) -> Option<f32> {
         Some(*self)
     }
 }
@@ -43,7 +43,7 @@ impl LoggableMessage for bool {
     fn get_duckdb_value_list(&self) -> Vec<duckdb::types::Value> {
       vec![duckdb::types::Value::Boolean(*self)]
     }
-    fn get_f32_value_by_name(&self, name: &str) -> Option<f32> {
+    fn get_f32_value_by_name(&self, _name: &str) -> Option<f32> {
         Some(if *self {1.0} else {0.0})
     }
 }
@@ -55,7 +55,7 @@ impl LoggableMessage for u32 {
     fn get_duckdb_value_list(&self) -> Vec<duckdb::types::Value> {
       vec![duckdb::types::Value::UInt(*self)]
     }
-    fn get_f32_value_by_name(&self, name: &str) -> Option<f32> {
+    fn get_f32_value_by_name(&self, _name: &str) -> Option<f32> {
         Some(*self as f32)
     }
 }
@@ -67,7 +67,7 @@ impl LoggableMessage for i64 {
     fn get_duckdb_value_list(&self) -> Vec<duckdb::types::Value> {
       vec![duckdb::types::Value::BigInt(*self)]
     }
-    fn get_f32_value_by_name(&self, name: &str) -> Option<f32> {
+    fn get_f32_value_by_name(&self, _name: &str) -> Option<f32> {
         Some(*self as f32)
     }
 }

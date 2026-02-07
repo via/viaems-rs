@@ -48,7 +48,7 @@ impl Table2dEditor {
                     let row_label_str = format!("{:3}", row_label);
                     ui.label(row_label_str);
 
-                    for (col_idx, col) in row.values.iter_mut().enumerate() {
+                    for (_col_idx, col) in row.values.iter_mut().enumerate() {
                         let field = egui::DragValue::new(col)
                             .update_while_editing(false);
                         if ui.add(field).changed() {

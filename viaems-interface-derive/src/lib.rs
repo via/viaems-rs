@@ -1,7 +1,7 @@
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
-use quote::{quote, format_ident};
+use quote::quote;
 use syn::{self, parse_macro_input, DeriveInput};
 
 // Generate a list of LoggableField structs from a prost-generated message
@@ -88,7 +88,6 @@ pub fn make_loggable(input: TokenStream) -> TokenStream {
 
         }
     };
-    println!("{}", expanded);
     proc_macro::TokenStream::from(expanded)
 }
 

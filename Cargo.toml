@@ -3,8 +3,7 @@ resolver = "2"
 members = [
   "viaems",
   "viaems-ui",
-  "viaems-firmware"
-, "viaems-interface-derive"]
+  "viaems-interface-derive"]
 
 
 [profile.dev]
