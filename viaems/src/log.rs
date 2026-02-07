@@ -1,10 +1,10 @@
 use duckdb;
 use duckdb::arrow::array::RecordBatch;
 use duckdb::arrow::datatypes::SchemaRef;
+use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, SystemTime};
-use std::collections::HashMap;
 
 use crate::interface;
 
@@ -64,8 +64,11 @@ impl Drop for UpdateWriter {
 impl UpdateWriter {
     fn ensure_columns(conn: &duckdb::Connection) -> Result<()> {
         let mut existing_columns = HashMap::new();
-        let mut message_fields = <i64 as interface::LoggableMessage>::get_loggable_fields("realtime_ns");
-        message_fields.append(&mut <interface::EngineUpdate as interface::LoggableMessage>::get_loggable_fields(""));
+        let mut message_fields =
+            <i64 as interface::LoggableMessage>::get_loggable_fields("realtime_ns");
+        message_fields.append(
+            &mut <interface::EngineUpdate as interface::LoggableMessage>::get_loggable_fields(""),
+        );
         let message_fields = message_fields;
 
         if let Ok(stmt) = &mut conn.prepare("DESCRIBE TABLE points;") {
@@ -78,10 +81,14 @@ impl UpdateWriter {
                 existing_columns.entry(n).or_insert(t);
             }
 
-            for interface::LoggableField{field_name, field_duckdb_typename} in &message_fields {
+            for interface::LoggableField {
+                field_name,
+                field_duckdb_typename,
+            } in &message_fields
+            {
                 if let Some(existing_type) = existing_columns.get(field_name) {
                     if existing_type != field_duckdb_typename {
-                    return Err(Error::FeedKeysMismatch(field_name.to_string()));
+                        return Err(Error::FeedKeysMismatch(field_name.to_string()));
                     }
                 } else {
                     // TODO add the column
@@ -90,7 +97,11 @@ impl UpdateWriter {
         } else {
             // Table did not exist or new database, go ahead and create points
             let mut query = "CREATE TABLE points (".to_owned();
-            for interface::LoggableField{field_name, field_duckdb_typename} in &message_fields {
+            for interface::LoggableField {
+                field_name,
+                field_duckdb_typename,
+            } in &message_fields
+            {
                 query += &format!("\"{}\" {}, ", field_name, field_duckdb_typename);
             }
 
@@ -134,13 +145,10 @@ impl UpdateWriter {
             tx,
             handle: Some(thr),
         })
-
     }
 
     pub fn add(&self, time: SystemTime, update: interface::EngineUpdate) {
-        self.tx
-            .send(LogMessage::Update { time, update })
-            .unwrap();
+        self.tx.send(LogMessage::Update { time, update }).unwrap();
     }
 
     fn write(appender: &mut duckdb::Appender, time: SystemTime, update: &interface::EngineUpdate) {
@@ -152,7 +160,9 @@ impl UpdateWriter {
             .unwrap();
 
         let mut params_list = interface::LoggableMessage::get_duckdb_value_list(&epoch_time);
-        params_list.append(&mut interface::LoggableMessage::get_duckdb_value_list(update));
+        params_list.append(&mut interface::LoggableMessage::get_duckdb_value_list(
+            update,
+        ));
 
         appender
             .append_row(duckdb::appender_params_from_iter(params_list))
@@ -191,23 +201,29 @@ impl Log {
     }
 
     pub fn keys(&self) -> Option<Vec<String>> {
-        Some(self.conn
-            .prepare("DESCRIBE TABLE points;").ok()?
-            .query_map([], |row| row.get::<_, String>("column_name")).ok()?
-            .flatten()
-            .skip(1)
-            .collect())
+        Some(
+            self.conn
+                .prepare("DESCRIBE TABLE points;")
+                .ok()?
+                .query_map([], |row| row.get::<_, String>("column_name"))
+                .ok()?
+                .flatten()
+                .skip(1)
+                .collect(),
+        )
     }
 
     pub fn get_writer(&self) -> Result<UpdateWriter> {
         let conn = self.conn.try_clone()?;
         UpdateWriter::new(conn)
-
     }
 
     pub fn try_clone(&self) -> Result<Log> {
         let conn = self.conn.try_clone()?;
-        Ok(Log { conn, filename: self.filename.clone() })
+        Ok(Log {
+            conn,
+            filename: self.filename.clone(),
+        })
     }
 
     pub fn query_arrow<F>(

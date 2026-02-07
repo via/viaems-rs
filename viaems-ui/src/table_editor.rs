@@ -1,35 +1,34 @@
 use crate::interface::configuration;
 
-pub struct Table2dEditor {
-}
+pub struct Table2dEditor {}
 
 impl Table2dEditor {
-
     pub fn new() -> Self {
-        Table2dEditor {
-        }
+        Table2dEditor {}
     }
 
-    pub fn show(&mut self, 
-                ui: &mut egui::Ui, 
-                reference: &configuration::Table2d,
-                table: &mut configuration::Table2d) -> bool {
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        reference: &configuration::Table2d,
+        table: &mut configuration::Table2d,
+    ) -> bool {
         let mut modified = false;
 
         egui::Grid::new("table")
             .num_columns(table.cols.as_ref().unwrap().values.len() + 1)
             .striped(true)
             .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.menu_button("⚙", |ui| {
-                            let _ = ui.button("TODO");
-                        });
-                        if *reference != *table {
-                            if ui.button("↺").clicked() {
-                                *table = reference.clone();
-                            }
-                        }
+                ui.horizontal(|ui| {
+                    ui.menu_button("⚙", |ui| {
+                        let _ = ui.button("TODO");
                     });
+                    if *reference != *table {
+                        if ui.button("↺").clicked() {
+                            *table = reference.clone();
+                        }
+                    }
+                });
                 if let Some(cols) = &table.cols {
                     for val in &cols.values {
                         let value = format!("{:3}", val);
@@ -37,7 +36,6 @@ impl Table2dEditor {
                     }
                     ui.end_row();
                 }
-
 
                 for (row_idx, row) in table.data.iter_mut().enumerate() {
                     let row_label = if let Some(rowaxis) = &table.rows {
@@ -49,46 +47,47 @@ impl Table2dEditor {
                     ui.label(row_label_str);
 
                     for (_col_idx, col) in row.values.iter_mut().enumerate() {
-                        let field = egui::DragValue::new(col)
-                            .update_while_editing(false);
+                        let field = egui::DragValue::new(col).update_while_editing(false);
                         if ui.add(field).changed() {
                             modified = true;
                         }
-
                     }
                     ui.end_row();
                 }
             });
         modified
     }
-
 }
 
-
-pub struct Table1dEditor {
-}
+pub struct Table1dEditor {}
 
 impl Table1dEditor {
-
     pub fn new() -> Self {
-        Table1dEditor {
-        }
+        Table1dEditor {}
     }
 
-    pub fn show(&mut self, 
-                ui: &mut egui::Ui, 
-                reference: &configuration::Table1d,
-                table: &mut configuration::Table1d) -> bool {
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        reference: &configuration::Table1d,
+        table: &mut configuration::Table1d,
+    ) -> bool {
         let mut modified = false;
 
         egui::Grid::new("table")
             .num_columns(2)
             .striped(true)
             .show(ui, |ui| {
-                ui.label(table.cols.get_or_insert_default().name.clone().unwrap_or("Value".to_string()));
+                ui.label(
+                    table
+                        .cols
+                        .get_or_insert_default()
+                        .name
+                        .clone()
+                        .unwrap_or("Value".to_string()),
+                );
                 ui.horizontal(|ui| {
-                    if ui.button("⚙").clicked() {
-                    }
+                    if ui.button("⚙").clicked() {}
                     if *reference != *table {
                         if ui.button("↺").clicked() {
                             *table = reference.clone();
@@ -115,5 +114,4 @@ impl Table1dEditor {
             });
         modified
     }
-
 }

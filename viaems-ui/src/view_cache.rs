@@ -1,7 +1,5 @@
-
-
 use std::collections::HashMap;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
@@ -205,10 +203,10 @@ impl Backend {
                     self.state.lock().unwrap().new_data.clear();
                     // Determine overall point count of the file
                     self.set_status(LoadingStatus::Loading { progress: 0.0 });
-                    if let Some(earliest) = r.get_earliest_time() &&
-                       let Some(latest) = r.get_latest_time() &&
-                       let Ok(total_count) = r.point_count_in_range(earliest, latest) {
-
+                    if let Some(earliest) = r.get_earliest_time()
+                        && let Some(latest) = r.get_latest_time()
+                        && let Ok(total_count) = r.point_count_in_range(earliest, latest)
+                    {
                         let earliest_ns = earliest
                             .duration_since(SystemTime::UNIX_EPOCH)
                             .unwrap()
@@ -328,7 +326,10 @@ impl Backend {
                     let ent = newhotcache.entry(col_name.to_owned()).or_insert(Vec::new());
                     for row_idx in 0..batch.num_rows() {
                         let value = values[row_idx];
-                        ent.push(Point{time: times[row_idx], value});
+                        ent.push(Point {
+                            time: times[row_idx],
+                            value,
+                        });
                     }
                 }
             })
@@ -354,11 +355,13 @@ impl Backend {
         let mut current_count = 0;
 
         // Only add keys that aren't already in the cache
-        let refkeys : Vec<&str> = {
+        let refkeys: Vec<&str> = {
             let locked = self.state.lock().unwrap();
-            new_keys.iter()
+            new_keys
+                .iter()
                 .filter(|x| locked.cache100.get(*x).is_none())
-                .map(|x| x.as_str()).collect()
+                .map(|x| x.as_str())
+                .collect()
         };
 
         let mut current_cache100 = Vec::new();
@@ -474,7 +477,7 @@ impl Backend {
                 }
             })
             .ok(); // TODO should we show that we failed?
-                   //
+        //
 
         self.set_status(LoadingStatus::Done);
 
@@ -488,7 +491,6 @@ impl Backend {
 
 impl ViewCache {
     pub fn new() -> ViewCache {
-
         let shared_state = Arc::new(Mutex::new(ViewSharedState {
             status: LoadingStatus::Done,
             point_count: 0,
@@ -522,11 +524,15 @@ impl ViewCache {
         }
     }
 
-    fn window_slice(window_range: Range<i64>, target_range: Range<i64>, render: &mut [Option<PointSummary>]) -> &mut [Option<PointSummary>]
-    {
+    fn window_slice(
+        window_range: Range<i64>,
+        target_range: Range<i64>,
+        render: &mut [Option<PointSummary>],
+    ) -> &mut [Option<PointSummary>] {
         let width = render.len();
 
-        let ns_per_pixel = ((width - 1) as i64 + window_range.max - window_range.min) / width as i64;
+        let ns_per_pixel =
+            ((width - 1) as i64 + window_range.max - window_range.min) / width as i64;
         let start_idx = ((target_range.min - window_range.min) / ns_per_pixel) as usize;
         let end_idx = ((target_range.max - window_range.min) / ns_per_pixel) as usize;
         let render_subslice = &mut render[start_idx..end_idx];
@@ -539,12 +545,12 @@ impl ViewCache {
         cache: &Vec<PointSummary>,
         dest: &mut [Option<PointSummary>],
     ) {
-
         let cache_start_idx = cache.partition_point(|x| x.time.min < times.min);
         if cache_start_idx == cache.len() {
             return;
         }
-        let cache_end_idx = cache_start_idx + cache[cache_start_idx..].partition_point(|x| x.time.max < times.max);
+        let cache_end_idx =
+            cache_start_idx + cache[cache_start_idx..].partition_point(|x| x.time.max < times.max);
 
         let width = dest.len();
         if width == 0 {
@@ -557,7 +563,6 @@ impl ViewCache {
             let end_pos = ((cache[idx].time.max - times.min) / ns_per_pixel) as usize;
 
             for pos in start_pos..=end_pos {
-
                 match &mut dest[pos] {
                     None => dest[pos] = Some(cache[idx]),
                     Some(x) => {
@@ -577,7 +582,8 @@ impl ViewCache {
         if cache_start_idx == cache.len() {
             return;
         }
-        let cache_end_idx = cache_start_idx + cache[cache_start_idx..].partition_point(|x| x.time < times.max);
+        let cache_end_idx =
+            cache_start_idx + cache[cache_start_idx..].partition_point(|x| x.time < times.max);
 
         let width = dest.len();
         if width == 0 {
@@ -596,9 +602,11 @@ impl ViewCache {
         }
     }
 
-    fn get_range_overlap_with_points(range: Range<i64>, key: &str, cache: &HashMap<String, Vec<Point>>) -> Option<Range<i64>> 
-      
-    {
+    fn get_range_overlap_with_points(
+        range: Range<i64>,
+        key: &str,
+        cache: &HashMap<String, Vec<Point>>,
+    ) -> Option<Range<i64>> {
         let mut result = None;
         if let Some(series) = cache.get(key) {
             if let (Some(first), Some(last)) = (series.first(), series.last()) {
@@ -629,54 +637,71 @@ impl ViewCache {
         let locked = self.state.lock().unwrap();
 
         // Use the new data cache if we overlap
-        let used_from_newcache: Option<Range<i64>> = Self::get_range_overlap_with_points(times, key, &locked.new_data);
+        let used_from_newcache: Option<Range<i64>> =
+            Self::get_range_overlap_with_points(times, key, &locked.new_data);
 
         let after_newcache_times = if let Some(overlap) = used_from_newcache {
             let render_subslice = Self::window_slice(times, overlap, render.as_mut_slice());
-            Self::render_cache_range_points(overlap, locked.new_data.get(key).unwrap(), render_subslice);
+            Self::render_cache_range_points(
+                overlap,
+                locked.new_data.get(key).unwrap(),
+                render_subslice,
+            );
             Range::new(times.min, overlap.min)
         } else {
             times
         };
 
-
         // After hotcache, we might have up to two regions that still need to be rendered from
         // cache, in the case that the hotcache is a pure subset of the render window
-        let mut needed_from_decimations : [Option<Range<i64>>; 2] = [Some(after_newcache_times), None];
+        let mut needed_from_decimations: [Option<Range<i64>>; 2] =
+            [Some(after_newcache_times), None];
 
         // If we're zoomed in, try to use the hotcache (if we have anything left to render)
         if !after_newcache_times.empty() && ns_per_pixel <= 50000000 {
-            let used_from_hotcache = Self::get_range_overlap_with_points(after_newcache_times, key, &locked.hotcache);
+            let used_from_hotcache =
+                Self::get_range_overlap_with_points(after_newcache_times, key, &locked.hotcache);
             if let Some(overlap) = used_from_hotcache {
                 let render_subslice = Self::window_slice(times, overlap, render.as_mut_slice());
-                Self::render_cache_range_points(overlap, locked.hotcache.get(key).unwrap(), render_subslice);
+                Self::render_cache_range_points(
+                    overlap,
+                    locked.hotcache.get(key).unwrap(),
+                    render_subslice,
+                );
             }
-
 
             if let Some(overlap) = used_from_hotcache {
-                let fully_overlaps = overlap.min <= after_newcache_times.min && overlap.max >= after_newcache_times.max;
+                let fully_overlaps = overlap.min <= after_newcache_times.min
+                    && overlap.max >= after_newcache_times.max;
                 if fully_overlaps {
                     needed_from_decimations = [None, None];
-                } else if overlap.min > after_newcache_times.min && overlap.max < after_newcache_times.max {
-                    needed_from_decimations = [Some(Range::new(after_newcache_times.min, overlap.min)), 
-                                               Some(Range::new(overlap.max, after_newcache_times.max))];
-
+                } else if overlap.min > after_newcache_times.min
+                    && overlap.max < after_newcache_times.max
+                {
+                    needed_from_decimations = [
+                        Some(Range::new(after_newcache_times.min, overlap.min)),
+                        Some(Range::new(overlap.max, after_newcache_times.max)),
+                    ];
                 } else if overlap.min > after_newcache_times.min {
-                    needed_from_decimations = [Some(Range::new(after_newcache_times.min, overlap.min)), 
-                                               None];
+                    needed_from_decimations = [
+                        Some(Range::new(after_newcache_times.min, overlap.min)),
+                        None,
+                    ];
                 } else if overlap.max < after_newcache_times.max {
-                    needed_from_decimations = [Some(Range::new(overlap.max, after_newcache_times.max)),
-                                               None];
+                    needed_from_decimations = [
+                        Some(Range::new(overlap.max, after_newcache_times.max)),
+                        None,
+                    ];
                 }
             }
-             
 
             // If not currently loading, and we weren't able to fulfill the whole range, issue a load`
             if locked.status == LoadingStatus::Done && needed_from_decimations[0].is_some() {
                 // But only if it overlaps with what the log actually holds, so we don't spin trying
                 // to load nonexistant rows forever
 
-                let to_request = after_newcache_times.overlap(&locked.time_range.unwrap_or_default());
+                let to_request =
+                    after_newcache_times.overlap(&locked.time_range.unwrap_or_default());
                 if let Some(req) = to_request {
                     self.cmd_chan
                         .send(ViewBackendCommand::SetHotCache {
@@ -709,7 +734,6 @@ impl ViewCache {
         });
 
         render
-
     }
 
     pub fn get_status(&self) -> LoadingStatus {
@@ -726,15 +750,18 @@ impl ViewCache {
 
     pub fn add_new_data(&self, time: SystemTime, update: &viaems::interface::EngineUpdate) {
         let mut state = self.state.lock().unwrap();
-        let time = time.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos() as i64;
+        let time = time
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as i64;
         for key in &self.keys {
             let e = state.new_data.entry(key.to_string()).or_insert(vec![]);
-            let value = if let Some(v) = <viaems::interface::EngineUpdate as viaems::interface::LoggableMessage>::get_f32_value_by_name(update, key) { 
+            let value = if let Some(v) = <viaems::interface::EngineUpdate as viaems::interface::LoggableMessage>::get_f32_value_by_name(update, key) {
                 v
             } else {
                 continue;
             };
-            e.push(Point{time, value});
+            e.push(Point { time, value });
 
             if e.len() > 2 {
                 // TODO improve this, but also move point summaries into decimation cache
@@ -754,21 +781,20 @@ impl ViewCache {
     }
 
     pub fn set_logreader(&mut self, reader: viaems::Log) {
-
         // Any key not available, discard from cache
         let available_keys = reader.keys().unwrap_or_default();
-        let new_keys = self.keys.clone()
-                                .into_iter()
-                                .filter(|p| available_keys.contains(p))
-                                .collect();
+        let new_keys = self
+            .keys
+            .clone()
+            .into_iter()
+            .filter(|p| available_keys.contains(p))
+            .collect();
 
         self.cmd_chan
             .send(ViewBackendCommand::Open(reader))
             .unwrap();
 
         self.set_keys(&new_keys);
-
-
     }
 
     pub fn set_keys(&mut self, keys: &Vec<String>) {

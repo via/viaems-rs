@@ -2,16 +2,16 @@
 
 use clap::Parser;
 use egui_file::FileDialog;
-use std::io::{Write, Read};
+use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use viaems::{self, connection, interface};
 
-mod log_view;
-mod view_cache;
-mod live_status;
 mod config_pane;
+mod live_status;
+mod log_view;
 mod table_editor;
+mod view_cache;
 //mod config_section;
 
 #[derive(Default)]
@@ -60,12 +60,13 @@ impl<'a> Application {
         target.on_update({
             let feed_state = self.latest_feed.clone();
             let view = self.view_cache.clone();
-            let logwriter : Option<viaems::UpdateWriter> = if let Some(reader) = &self.log {
+            let logwriter: Option<viaems::UpdateWriter> = if let Some(reader) = &self.log {
                 let writer = reader.get_writer().expect("Unable to create log writer");
-                self.logview.set_available_keys(&reader.keys().unwrap_or_default());
+                self.logview
+                    .set_available_keys(&reader.keys().unwrap_or_default());
                 Some(writer)
             } else {
-                None 
+                None
             };
             move |time: SystemTime, update: &interface::EngineUpdate| {
                 if let Some(w) = &logwriter {
@@ -79,14 +80,15 @@ impl<'a> Application {
         let req = interface::Request {
             id: 1,
             request: Some(interface::request::Request::Getconfig(
-                    interface::request::GetConfig{}
+                interface::request::GetConfig {},
             )),
         };
         target.command(req, {
             let latest_config = self.live_configuration.clone();
             move |resp| {
-                if let Some(response) = resp.response &&
-                   let interface::response::Response::Getconfig(config) = response {
+                if let Some(response) = resp.response
+                    && let interface::response::Response::Getconfig(config) = response
+                {
                     *latest_config.lock().unwrap() = config.config;
                 }
             }
@@ -99,16 +101,17 @@ impl<'a> Application {
         let log = viaems::Log::new(filename);
 
         self.view_cache
-            .lock().unwrap()
+            .lock()
+            .unwrap()
             .set_logreader(log.try_clone().expect("Unable to create logview reader"));
-        self.logview.set_available_keys(&log.keys().unwrap_or_default());
+        self.logview
+            .set_available_keys(&log.keys().unwrap_or_default());
         self.log = Some(log);
         println!("Opening log");
     }
 
-    fn connect_udp(&mut self) {
-    }
-    
+    fn connect_udp(&mut self) {}
+
     fn connect_usb(&mut self) {
         let conn = connection::Connection::new_usb();
         self.set_target(conn);
@@ -163,23 +166,26 @@ fn main() -> Result<(), eframe::Error> {
         }
 
         if state.save_config_dialog.show(ctx).selected() {
-            if let Some(path) = state.save_config_dialog.path() &&
-               let Ok(mut file) = std::fs::File::create(path) &&
-               let Some(config) = &state.desired_configuration {
-                   let encoded = prost::Message::encode_to_vec(config);
-                   file.write_all(encoded.as_slice()).expect("Failed to write config");
+            if let Some(path) = state.save_config_dialog.path()
+                && let Ok(mut file) = std::fs::File::create(path)
+                && let Some(config) = &state.desired_configuration
+            {
+                let encoded = prost::Message::encode_to_vec(config);
+                file.write_all(encoded.as_slice())
+                    .expect("Failed to write config");
             }
         }
 
         if state.load_config_dialog.show(ctx).selected() {
-            if let Some(path) = state.load_config_dialog.path() &&
-               let Ok(mut file) = std::fs::File::open(path) {
-                   let mut contents = vec![];
-                   file.read_to_end(&mut contents).unwrap();
-                   match prost::Message::decode(contents.as_slice()) {
-                       Err(e) => println!("Failed to parse config: {}", e),
-                       Ok(config) => state.desired_configuration = Some(config),
-                   }
+            if let Some(path) = state.load_config_dialog.path()
+                && let Ok(mut file) = std::fs::File::open(path)
+            {
+                let mut contents = vec![];
+                file.read_to_end(&mut contents).unwrap();
+                match prost::Message::decode(contents.as_slice()) {
+                    Err(e) => println!("Failed to parse config: {}", e),
+                    Ok(config) => state.desired_configuration = Some(config),
+                }
             }
         }
 
@@ -214,7 +220,7 @@ fn main() -> Result<(), eframe::Error> {
                         if ui.button("Export config").clicked() {
                             state.save_config_dialog.open();
                             ui.close();
-                        } 
+                        }
                     }
                 });
             });
@@ -226,12 +232,13 @@ fn main() -> Result<(), eframe::Error> {
                 .show(ctx, |ui| {
                     let latest_feed = state.latest_feed.lock().unwrap().update.clone();
                     live_status::render_status_pane(ui, &latest_feed);
-            });
+                });
         }
 
-        if let Some(live_config) = &*state.live_configuration.lock().unwrap() &&
-               state.desired_configuration.is_none() {
-            // If we just connected to a target, lets reset our desired state 
+        if let Some(live_config) = &*state.live_configuration.lock().unwrap()
+            && state.desired_configuration.is_none()
+        {
+            // If we just connected to a target, lets reset our desired state
             state.desired_configuration = Some(live_config.clone());
         }
         if let Some(config) = &mut state.desired_configuration {
@@ -242,17 +249,19 @@ fn main() -> Result<(), eframe::Error> {
                             let req = interface::Request {
                                 id: 1,
                                 request: Some(interface::request::Request::Setconfig(
-                                        interface::request::SetConfig{
-                                          config: Some(config.clone())
-                                        }
+                                    interface::request::SetConfig {
+                                        config: Some(config.clone()),
+                                    },
                                 )),
                             };
                             target.command(req, {
                                 let latest_config = state.live_configuration.clone();
                                 move |resp| {
-                                    if let Some(response) = resp.response &&
-                                        let interface::response::Response::Setconfig(config) = response {
-                                            *latest_config.lock().unwrap() = config.config;
+                                    if let Some(response) = resp.response
+                                        && let interface::response::Response::Setconfig(config) =
+                                            response
+                                    {
+                                        *latest_config.lock().unwrap() = config.config;
                                     }
                                 }
                             });
@@ -270,7 +279,7 @@ fn main() -> Result<(), eframe::Error> {
                             let req = interface::Request {
                                 id: 1,
                                 request: Some(interface::request::Request::Flashconfig(
-                                        interface::request::FlashConfig{}
+                                    interface::request::FlashConfig {},
                                 )),
                             };
                             target.command(req, {
@@ -284,9 +293,9 @@ fn main() -> Result<(), eframe::Error> {
 
                 ui.separator();
                 let live_config = state.live_configuration.lock().unwrap();
-                let config_ref = if let Some(c) = &*live_config { 
-                    c 
-                } else { 
+                let config_ref = if let Some(c) = &*live_config {
+                    c
+                } else {
                     // We have a desired config but no live config, this should only happen from a
                     // config import with no live target, so to make the UI cleaner lets make the
                     // reference config a copy of our desired config
@@ -298,12 +307,10 @@ fn main() -> Result<(), eframe::Error> {
         egui::TopBottomPanel::bottom("Status").show(ctx, |ui| {
             match &state.target {
                 None => ui.label("Target: Not connected"),
-                Some(_) => {
-                    match *state.live_configuration.lock().unwrap() {
-                        None => ui.label("Target: Connecting..."),
-                        Some(_) => ui.label("Target: Connected"),
-                    }
-                }
+                Some(_) => match *state.live_configuration.lock().unwrap() {
+                    None => ui.label("Target: Connecting..."),
+                    Some(_) => ui.label("Target: Connected"),
+                },
             };
             match &state.log {
                 None => ui.label("Log: Not connected"),

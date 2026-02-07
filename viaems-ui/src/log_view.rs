@@ -136,8 +136,11 @@ impl LogViewer {
             pane.series.retain(|s| keys.contains(&s.name));
         }
 
-        self.behavior.cache.lock().unwrap().set_keys(&self.current_keys());
-
+        self.behavior
+            .cache
+            .lock()
+            .unwrap()
+            .set_keys(&self.current_keys());
     }
 
     fn current_keys(&self) -> Vec<String> {
@@ -155,22 +158,20 @@ impl LogViewer {
         result
     }
 
-
-
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-
         ui.input_mut(|i| {
             if self.follow_feed {
                 let maybe_range = self.behavior.cache.lock().unwrap().get_log_time_range();
                 if let Some(range) = maybe_range {
                     let twentyago = range.max - 20_000_000_000;
                     self.set_time_range(view_cache::Range::new(twentyago, range.max));
-
                 }
             } else if let Some(mut timerange) = self.get_time_range() {
                 // Hack to prevent scroll/drag when settings panes are open
                 let rect = ui.max_rect();
-                if !self.configuring() && rect.contains(i.pointer.interact_pos().unwrap_or_default()) {
+                if !self.configuring()
+                    && rect.contains(i.pointer.interact_pos().unwrap_or_default())
+                {
                     let delta = i.smooth_scroll_delta;
                     if delta.x != 0.0 || delta.y != 0.0 {
                         let zoom = -delta.y as f64 / 100.0;
@@ -207,29 +208,33 @@ impl LogViewer {
             }
 
             if i.consume_shortcut(&egui::KeyboardShortcut::new(
-                    egui::Modifiers::default(),
-                    egui::Key::F,
+                egui::Modifiers::default(),
+                egui::Key::F,
             )) {
                 self.follow_feed = !self.follow_feed;
             }
         });
-        ui.with_layout(egui::Layout::top_down(egui::Align::Max),|ui| {
+        ui.with_layout(egui::Layout::top_down(egui::Align::Max), |ui| {
             ui.horizontal(|ui| {
-                if ui.add(egui::Button::new("⛶"))
+                if ui
+                    .add(egui::Button::new("⛶"))
                     .on_hover_text("Show entire log")
-                        .clicked() {
-                            let maybe_range = self.behavior.cache.lock().unwrap().get_log_time_range();
-                            if let Some(range) = maybe_range {
-                                self.set_time_range(range);
-                                self.follow_feed = false;
-                            }
-                        }
+                    .clicked()
+                {
+                    let maybe_range = self.behavior.cache.lock().unwrap().get_log_time_range();
+                    if let Some(range) = maybe_range {
+                        self.set_time_range(range);
+                        self.follow_feed = false;
+                    }
+                }
 
                 let follow_button = egui::Button::new("⏭").selected(self.follow_feed);
-                if ui.add(follow_button)
+                if ui
+                    .add(follow_button)
                     .on_hover_text("Update viewer time range for new data automatically")
-                        .clicked() {
-                            self.follow_feed = !self.follow_feed;
+                    .clicked()
+                {
+                    self.follow_feed = !self.follow_feed;
                 }
             });
         });
@@ -238,7 +243,11 @@ impl LogViewer {
         self.tree.ui(&mut self.behavior, ui);
         // TODO hack, find a way to just trigger this from the settings itself
         if self.current_keys() != before_keys {
-            self.behavior.cache.lock().unwrap().set_keys(&self.current_keys());
+            self.behavior
+                .cache
+                .lock()
+                .unwrap()
+                .set_keys(&self.current_keys());
         }
 
         if let Some(range) = &self.behavior.config.time_range {
@@ -272,7 +281,12 @@ impl LogViewer {
     }
 
     fn configuring(&self) -> bool {
-        self.behavior.config.panes.iter().find(|p| p.settings_open).is_some()
+        self.behavior
+            .config
+            .panes
+            .iter()
+            .find(|p| p.settings_open)
+            .is_some()
     }
 }
 
@@ -320,27 +334,29 @@ impl egui_tiles::Behavior<Pane> for LogViewerBehavior {
             .open_bool(&mut config.settings_open)
             .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
             .show(|ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                egui::CollapsingHeader::new("Series").default_open(true).show(ui, |ui| {
-                    egui::Grid::new("series")
-                        .num_columns(4)
-                        .striped(true)
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    egui::CollapsingHeader::new("Series")
+                        .default_open(true)
                         .show(ui, |ui| {
-                            for series in &mut config.series {
-                                let mut min = series.min.to_string();
-                                let mut max = series.max.to_string();
-                                ui.checkbox(&mut series.enabled, series.name.clone());
-                                ui.text_edit_singleline(&mut min);
-                                ui.text_edit_singleline(&mut max);
-                                ui.color_edit_button_srgba(&mut series.color);
-                                series.min = min.parse().unwrap_or_default();
-                                series.max = max.parse().unwrap_or_default();
-                                ui.end_row();
-                            }
+                            egui::Grid::new("series")
+                                .num_columns(4)
+                                .striped(true)
+                                .show(ui, |ui| {
+                                    for series in &mut config.series {
+                                        let mut min = series.min.to_string();
+                                        let mut max = series.max.to_string();
+                                        ui.checkbox(&mut series.enabled, series.name.clone());
+                                        ui.text_edit_singleline(&mut min);
+                                        ui.text_edit_singleline(&mut max);
+                                        ui.color_edit_button_srgba(&mut series.color);
+                                        series.min = min.parse().unwrap_or_default();
+                                        series.max = max.parse().unwrap_or_default();
+                                        ui.end_row();
+                                    }
+                                });
                         });
                 });
             });
-        });
 
         for series in &config.series {
             if !series.enabled {
@@ -399,7 +415,6 @@ impl egui_tiles::Behavior<Pane> for LogViewerBehavior {
                 ));
             }
         }
-
 
         egui_tiles::UiResponse::None
     }

@@ -2,11 +2,11 @@ pub mod connection;
 pub mod interface;
 mod log;
 
-pub use log::UpdateWriter;
 pub use log::Log;
+pub use log::UpdateWriter;
 
 use std::collections::VecDeque;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
@@ -64,17 +64,19 @@ impl Manager {
                         if let Some(cb) = &mut state.on_update {
                             cb(time, &eu);
                         }
-                    },
+                    }
                     Some(interface::message::Msg::Response(response)) => {
                         let mut state = state.lock().unwrap();
                         if let Some(command) = state.commands.pop_front() {
                             (command.callback)(response);
                             if let Some(command) = &state.commands.front() {
                                 let req = command.request.clone();
-                                conn.get_writer().send(interface::Message{msg: Some(interface::message::Msg::Request(req))});
+                                conn.get_writer().send(interface::Message {
+                                    msg: Some(interface::message::Msg::Request(req)),
+                                });
                             }
                         }
-                    },
+                    }
                     _ => (),
                 },
 
@@ -91,7 +93,7 @@ impl Manager {
 
     pub fn on_update<F>(&self, f: F)
     where
-        F: FnMut(SystemTime,  &interface::EngineUpdate) -> () + Send + 'static,
+        F: FnMut(SystemTime, &interface::EngineUpdate) -> () + Send + 'static,
     {
         let mut locked = self.state.lock().unwrap();
         locked.on_update = Some(Box::new(f));
@@ -103,7 +105,9 @@ impl Manager {
     {
         let mut locked = self.state.lock().unwrap();
         if locked.commands.len() == 0 {
-            self.writer.send(interface::Message{ msg: Some(interface::message::Msg::Request(req.clone()))});
+            self.writer.send(interface::Message {
+                msg: Some(interface::message::Msg::Request(req.clone())),
+            });
         }
         let command = Command {
             callback: Box::new(callback),

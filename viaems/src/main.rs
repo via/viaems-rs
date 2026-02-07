@@ -46,7 +46,7 @@ fn main() {
         ConnectionMode::Exec => {
             let binary = args.exec.unwrap_or("viaems".into());
             connection::Connection::new_exec(&binary)
-        },
+        }
         ConnectionMode::Udp => {
             let dest = if let Some(s) = args.udpdest {
                 s.parse().expect("failed to parse udp destination")
@@ -59,16 +59,17 @@ fn main() {
                 panic!("Unable to detect ViaEMS and not dest provided");
             }
 
-            println!("Connecting to {:?} via {:?}", devices[0].target_ucast_ipaddr, devices[0].local_ipaddr);
+            println!(
+                "Connecting to {:?} via {:?}",
+                devices[0].target_ucast_ipaddr, devices[0].local_ipaddr
+            );
             connection::Connection::new_udp(&devices[0])
-        },
-        ConnectionMode::Usb => connection::Connection::new_usb()
+        }
+        ConnectionMode::Usb => connection::Connection::new_usb(),
     };
-    
 
     match args.command {
         CliCommands::Record { filename } => {
-
             let manager = viaems::Manager::new(connection);
             record(&filename, manager)
         }
@@ -98,11 +99,11 @@ fn read(filename: &str) {
 }
 
 fn bootloader(manager: viaems::Manager) {
-    manager.blocking_request(viaems::interface::Request { 
+    manager.blocking_request(viaems::interface::Request {
         id: 0,
         request: Some(viaems::interface::request::Request::Resettobootloader(
-                viaems::interface::request::ResetToBootloader{}
-                )) 
+            viaems::interface::request::ResetToBootloader {},
+        )),
     });
 }
 

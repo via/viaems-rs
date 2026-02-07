@@ -1,10 +1,10 @@
-use std::sync::{mpsc, atomic, Arc};
-use crate::connection::{stream, Connection, RxMessage};
+use crate::connection::{Connection, RxMessage, stream};
 use crate::interface;
 use std::io::Write;
+use std::sync::{Arc, atomic, mpsc};
 
 use std::process::{Command, Stdio};
-use std::time::{SystemTime, Duration};
+use std::time::{Duration, SystemTime};
 
 impl Connection {
     pub fn new_exec(binary: &str) -> Connection {
@@ -31,26 +31,27 @@ impl Connection {
                         Err(stream::Error::IOError(x)) => {
                             println!("Failed to read from target: {}", x);
                             break;
-                        },
+                        }
                         Err(stream::Error::FrameDecodeError) => continue,
                         Ok(pdu) => {
                             match prost::Message::decode(pdu.as_slice()) {
                                 Ok(message) => {
                                     let time = SystemTime::now();
-                                    if recv_tx.send(RxMessage{time, message}).is_err() { break; }
-                                },
+                                    if recv_tx.send(RxMessage { time, message }).is_err() {
+                                        break;
+                                    }
+                                }
                                 Err(e) => {
                                     println!("Failed to decode! {e}");
                                     continue;
-                                },
+                                }
                             };
                         }
                     };
-
                 }
-            }});
+            }
+        });
 
-                
         let (send_tx, send_rx) = mpsc::channel::<interface::Message>();
 
         let tx_thr = std::thread::spawn({
@@ -64,7 +65,7 @@ impl Connection {
                     match send_rx.recv_timeout(Duration::from_millis(100)) {
                         Ok(command) => {
                             let pdu = prost::Message::encode_to_vec(&command);
-                            let encoded = stream::write(pdu.as_slice()); 
+                            let encoded = stream::write(pdu.as_slice());
                             let mut position = 0;
 
                             while position < encoded.len() {
@@ -75,17 +76,15 @@ impl Connection {
                         _ => break,
                     }
                 }
-            }});
-
+            }
+        });
 
         Connection {
             recv_thr: Some(rx_thr),
             write_thr: Some(tx_thr),
             running,
             rx: recv_rx,
-            tx: send_tx
+            tx: send_tx,
         }
-
-
     }
 }

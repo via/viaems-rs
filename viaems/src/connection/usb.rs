@@ -1,22 +1,20 @@
-use std::sync::{mpsc, atomic, Arc};
-use std::time::{SystemTime, Duration};
 use std::io::Write;
+use std::sync::{Arc, atomic, mpsc};
+use std::time::{Duration, SystemTime};
 
-use nusb::transfer::{ControlOut, Bulk, In, Out};
 use nusb::MaybeFuture;
+use nusb::transfer::{Bulk, ControlOut, In, Out};
 
-use crate::interface;
 use crate::connection::{Connection, RxMessage, stream};
-
+use crate::interface;
 
 impl Connection {
     pub fn new_usb() -> Connection {
-        const VIAEMS_VID : u16 = 0x1209;
-        const VIAEMS_PID : u16 = 0x2041;
+        const VIAEMS_VID: u16 = 0x1209;
+        const VIAEMS_PID: u16 = 0x2041;
 
-        const USB_IN_EP : u8 = 0x81;
-        const USB_OUT_EP : u8 = 0x01;
-
+        const USB_IN_EP: u8 = 0x81;
+        const USB_OUT_EP: u8 = 0x01;
 
         let deviceinfo = nusb::list_devices()
             .wait()
@@ -28,21 +26,31 @@ impl Connection {
         let interface = device.detach_and_claim_interface(1).wait().unwrap();
 
         // ViaEMS TinyUSB needs DTR to make the transmit buffer non-overwritable
-        interface.control_out(ControlOut {
-            control_type: nusb::transfer::ControlType::Class,
-            recipient: nusb::transfer::Recipient::Interface,
-            request: 0x22,
-            value: 3, // DTR | RTS
-            index: 0,
-            data: &[],
-        }, Duration::from_millis(100)).wait().unwrap();
+        interface
+            .control_out(
+                ControlOut {
+                    control_type: nusb::transfer::ControlType::Class,
+                    recipient: nusb::transfer::Recipient::Interface,
+                    request: 0x22,
+                    value: 3, // DTR | RTS
+                    index: 0,
+                    data: &[],
+                },
+                Duration::from_millis(100),
+            )
+            .wait()
+            .unwrap();
 
-        let rx = interface.endpoint::<Bulk, In>(USB_IN_EP).unwrap()
+        let rx = interface
+            .endpoint::<Bulk, In>(USB_IN_EP)
+            .unwrap()
             .reader(1024)
             .with_num_transfers(4)
             .with_read_timeout(Duration::from_millis(100));
 
-        let mut tx = interface.endpoint::<Bulk, Out>(USB_OUT_EP).unwrap()
+        let mut tx = interface
+            .endpoint::<Bulk, Out>(USB_OUT_EP)
+            .unwrap()
             .writer(1024)
             .with_num_transfers(4)
             .with_write_timeout(Duration::from_millis(100));
@@ -56,28 +64,29 @@ impl Connection {
             move || {
                 loop {
                     if !running.load(atomic::Ordering::Relaxed) {
-                      break;
+                        break;
                     }
                     match stream_reader.read() {
                         Err(stream::Error::IOError(x)) => {
                             println!("Failed to read from target: {}", x);
                             break;
-                        },
+                        }
                         Err(stream::Error::FrameDecodeError) => continue,
                         Ok(pdu) => {
                             match prost::Message::decode(pdu.as_slice()) {
                                 Ok(message) => {
                                     let time = SystemTime::now();
-                                    if recv_tx.send(RxMessage{time, message}).is_err() { break; }
-                                },
+                                    if recv_tx.send(RxMessage { time, message }).is_err() {
+                                        break;
+                                    }
+                                }
                                 Err(e) => {
                                     println!("Failed to decode! {e}");
                                     continue;
-                                },
+                                }
                             };
                         }
                     };
-
                 }
             }
         });
@@ -88,12 +97,12 @@ impl Connection {
             move || {
                 loop {
                     if !running.load(atomic::Ordering::Relaxed) {
-                      break;
+                        break;
                     }
                     match send_rx.recv_timeout(Duration::from_millis(100)) {
                         Ok(command) => {
                             let pdu = prost::Message::encode_to_vec(&command);
-                            let encoded = stream::write(pdu.as_slice()); 
+                            let encoded = stream::write(pdu.as_slice());
                             let mut position = 0;
 
                             while position < encoded.len() {
@@ -111,14 +120,12 @@ impl Connection {
             }
         });
 
-
-        Connection { 
-          recv_thr: Some(recv_thread),
-          write_thr: Some(send_thread),
-          running, 
-          rx: recv_rx, 
-          tx: send_tx, 
+        Connection {
+            recv_thr: Some(recv_thread),
+            write_thr: Some(send_thread),
+            running,
+            rx: recv_rx,
+            tx: send_tx,
         }
     }
 }
-

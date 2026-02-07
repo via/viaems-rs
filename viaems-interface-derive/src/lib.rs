@@ -2,18 +2,19 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{self, parse_macro_input, DeriveInput};
+use syn::{self, DeriveInput, parse_macro_input};
 
 // Generate a list of LoggableField structs from a prost-generated message
 
 #[proc_macro_derive(LoggableStruct)]
-pub fn make_loggable(input: TokenStream) -> TokenStream { 
+pub fn make_loggable(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let struct_name = input.ident;
-    
-    let fields = if let syn::Data::Struct(s) = &input.data &&
-                    let syn::Fields::Named(f) = &s.fields {
-                        &f.named
+
+    let fields = if let syn::Data::Struct(s) = &input.data
+        && let syn::Fields::Named(f) = &s.fields
+    {
+        &f.named
     } else {
         panic!("Only structs with named fields are supported")
     };
@@ -25,7 +26,7 @@ pub fn make_loggable(input: TokenStream) -> TokenStream {
             quote! {
                 {
                     let path = prefix.clone() + #field_name_str;
-                    result.append(&mut <#ft as crate::interface::LoggableMessage>::get_loggable_fields(&path)); 
+                    result.append(&mut <#ft as crate::interface::LoggableMessage>::get_loggable_fields(&path));
                 }
             }
     });
@@ -35,7 +36,7 @@ pub fn make_loggable(input: TokenStream) -> TokenStream {
             let field_name = f.ident.as_ref().unwrap();
             let ft = &f.ty;
             quote! {
-                result.append(&mut <#ft as crate::interface::LoggableMessage>::get_duckdb_value_list(&self.#field_name)); 
+                result.append(&mut <#ft as crate::interface::LoggableMessage>::get_duckdb_value_list(&self.#field_name));
             }
     });
 
@@ -82,7 +83,7 @@ pub fn make_loggable(input: TokenStream) -> TokenStream {
 
                 #(#f32getters)
                 *
-                
+
                 None
             }
 
@@ -90,4 +91,3 @@ pub fn make_loggable(input: TokenStream) -> TokenStream {
     };
     proc_macro::TokenStream::from(expanded)
 }
-

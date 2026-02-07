@@ -1,11 +1,11 @@
-pub mod usb;
-pub mod udp;
 pub mod exec;
+pub mod udp;
+pub mod usb;
 
+use crate::interface;
+use std::sync::{Arc, atomic, mpsc};
 use std::thread;
 use std::time::{Duration, SystemTime};
-use std::sync::{atomic, mpsc, Arc};
-use crate::interface;
 
 pub enum ConnError {
     Timeout,
@@ -37,35 +37,36 @@ pub struct RxMessage {
 }
 
 pub struct Connection {
-  recv_thr: Option<thread::JoinHandle<()>>,
-  write_thr: Option<thread::JoinHandle<()>>,
-  running: Arc<atomic::AtomicBool>,
-  rx: mpsc::Receiver<RxMessage>,
-  tx: mpsc::Sender<interface::Message>,
+    recv_thr: Option<thread::JoinHandle<()>>,
+    write_thr: Option<thread::JoinHandle<()>>,
+    running: Arc<atomic::AtomicBool>,
+    rx: mpsc::Receiver<RxMessage>,
+    tx: mpsc::Sender<interface::Message>,
 }
 
 impl Drop for Connection {
-  fn drop(&mut self) {
-    self.running.store(false, atomic::Ordering::Relaxed);
-      if let Some(t) = self.recv_thr.take() {
-          t.join().unwrap();
-      }
-      if let Some(t) = self.write_thr.take() {
-          t.join().unwrap();
-      }
-  }
+    fn drop(&mut self) {
+        self.running.store(false, atomic::Ordering::Relaxed);
+        if let Some(t) = self.recv_thr.take() {
+            t.join().unwrap();
+        }
+        if let Some(t) = self.write_thr.take() {
+            t.join().unwrap();
+        }
+    }
 }
 
 impl Connection {
     pub fn recv(&self, timeout: Duration) -> Result<RxMessage, ConnError> {
-      return Ok(self.rx.recv_timeout(timeout)?);
+        return Ok(self.rx.recv_timeout(timeout)?);
     }
 
     pub fn get_writer(&self) -> Writer {
-        Writer { tx: self.tx.clone() }
+        Writer {
+            tx: self.tx.clone(),
+        }
     }
 }
-
 
 mod stream {
     use std::io::{BufRead, BufReader, Read};
@@ -79,7 +80,6 @@ mod stream {
             Error::IOError(inner)
         }
     }
-
 
     pub struct StreamReader<T> {
         inner: BufReader<T>,
@@ -102,17 +102,22 @@ mod stream {
                 return Err(Error::FrameDecodeError);
             }
 
-            let decoded_size = cobs::decode_in_place(raw_bytes.as_mut_slice()).expect("failed to decode cobs frame");
+            let decoded_size = cobs::decode_in_place(raw_bytes.as_mut_slice())
+                .expect("failed to decode cobs frame");
             raw_bytes.truncate(decoded_size);
 
-            let pdu = &raw_bytes[2..raw_bytes.len()-4];
+            let pdu = &raw_bytes[2..raw_bytes.len() - 4];
 
             let len = u16::from_le_bytes(raw_bytes[0..2].try_into().unwrap());
             if len as usize != pdu.len() {
                 return Err(Error::FrameDecodeError);
             }
 
-            let crc = u32::from_le_bytes(raw_bytes[decoded_size-4..decoded_size].try_into().unwrap());
+            let crc = u32::from_le_bytes(
+                raw_bytes[decoded_size - 4..decoded_size]
+                    .try_into()
+                    .unwrap(),
+            );
             if crc != self.crc.checksum(pdu) {
                 return Err(Error::FrameDecodeError);
             }
