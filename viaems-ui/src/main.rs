@@ -176,7 +176,10 @@ fn main() -> Result<(), eframe::Error> {
                let Ok(mut file) = std::fs::File::open(path) {
                    let mut contents = vec![];
                    file.read_to_end(&mut contents).unwrap();
-                   state.desired_configuration = prost::Message::decode(contents.as_slice()).ok();
+                   match prost::Message::decode(contents.as_slice()) {
+                       Err(e) => println!("Failed to parse config: {}", e),
+                       Ok(config) => state.desired_configuration = Some(config),
+                   }
             }
         }
 

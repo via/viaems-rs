@@ -2,30 +2,31 @@ syntax = "proto3";
 
 package viaems.console;
 
+// Simple header for messages
 message Header {
-  fixed32 seq = 1;
-  fixed32 timestamp = 2;
+  fixed32 seq = 1;        // Sequence number, increments for each payload
+  fixed32 timestamp = 2;  // Timestamp in ticks, typically 250 ns
 }
 
 enum SensorFault {
-  SENSOR_NO_FAULT = 0;
-  SENSOR_RANGE_FAULT = 1;
-  SENSOR_CONNECTION_FAULT = 2;
+  SENSOR_NO_FAULT = 0;          // Sensor has no fault
+  SENSOR_RANGE_FAULT = 1;       // Sensor raw value is out of range
+  SENSOR_CONNECTION_FAULT = 2;  // Unable to communicate with sensor or ADC
 }
 
 message Sensors {
-  float map = 1;
-  float iat = 2;
-  float clt = 3;
-  float brv = 4;
-  float tps = 5;
-  float aap = 6;
-  float frt = 7;
-  float ego = 8;
-  float frp = 9;
-  float eth = 10;
+  float map = 1;    // Manifold pressure (kpa)
+  float iat = 2;    // Intake air temperature (C)
+  float clt = 3;    // Coolant/Head temperature (C)
+  float brv = 4;    // Battery voltage (V)
+  float tps = 5;    // Throttle position (%)
+  float aap = 6;    // Ambient air pressure (kpa)
+  float frt = 7;    // Fuel rail temperature (C)
+  float ego = 8;    // Exhaust gas oxygen (lambda)
+  float frp = 9;    // Fuel rail pressure (kpa)
+  float eth = 10;   // Ethanol content (%)
 
-  float knock1 = 14;
+  float knock1 = 14; // Raw knock energy level
   float knock2 = 15;
   
   SensorFault map_fault = 32;
@@ -39,6 +40,7 @@ message Sensors {
   SensorFault frp_fault = 40;
   SensorFault eth_fault = 41;
 
+  // Current derivatives of all sensor inputs, after lag filter
   float map_rate = 64; 
   float iat_rate = 65; 
   float clt_rate = 66; 
@@ -52,46 +54,47 @@ message Sensors {
 }
 
 enum DecoderLossReason {
-  DECODER_NO_LOSS = 0;
-  DECODER_TRIGGER_TOOTH_VARIATION = 1;
-  DECODER_TRIGGER_COUNT_HIGH = 2;
-  DECODER_TRIGGER_COUNT_LOW = 3;
-  DECODER_EXPIRED = 4;
-  DECODER_OVERFLOWED = 5;
+  DECODER_NO_LOSS = 0;                  // Decoder detects no issue
+  DECODER_TRIGGER_TOOTH_VARIATION = 1;  // Inter-tooth time variation exceeds configured amount
+  DECODER_TRIGGER_COUNT_HIGH = 2;       // Too many triggers between syncs
+  DECODER_TRIGGER_COUNT_LOW = 3;        // Too few triggers between syncs
+  DECODER_EXPIRED = 4;                  // Decoder has not been updated and is no longer valid
+  DECODER_OVERFLOWED = 5;               // Decoder received inputs faster than it could handle themk
 }
 
 message Position {
-  fixed32 time = 1; 
-  fixed32 valid_before_timestamp = 2; 
+  fixed32 time = 1;                     // Time of the last trigger that updated the position
+  fixed32 valid_before_timestamp = 2;   // Time by which new position should be
+                                        // known, and this position is no longer valid
 
-  bool has_position = 3;
-  bool synced = 4;
-  DecoderLossReason loss_cause = 5;
+  bool has_position = 3;                // This update has position information
+  bool synced = 4;                      // This update is from a synced decoder
+  DecoderLossReason loss_cause = 5;     // Reason the decoder lost position, if not synced
 
-  float last_angle = 6;
-  float instantaneous_rpm = 7;
-  float average_rpm = 8;
+  float last_angle = 6;                 // Angle of decoder at time `time`
+  float instantaneous_rpm = 7;          // RPM as determined by last two triggers
+  float average_rpm = 8;                // RPM over window of triggers (or whole revolution)
 }
 
 message Calculations {
-  float advance = 1;
-  float dwell_us = 2;
-  float fuel_us = 3;
+  float advance = 1;                    // Timing advance (degrees)
+  float dwell_us = 2;                   // Ignition dwell time (uS)
+  float fuel_us = 3;                    // Fuel pulsewidth (uS)
 
-  float airmass_per_cycle = 4;
-  float fuelvol_per_cycle = 5;
+  float airmass_per_cycle = 4;          // Air mass in one engine cycle per cylinder (g)
+  float fuelvol_per_cycle = 5;          // Fuel volume in one engine cycle per cylinder (cc)
 
-  float tipin_percent = 6;
-  float injector_dead_time = 7;
-  float pulse_width_correction = 8;
-  float lambda = 9;
-  float ve = 10;
-  float engine_temp_enrichment = 11;
+  float tipin_percent = 6;              // Currently applied acceleration enrichment multiplier
+  float injector_dead_time = 7;         // Injector dead time (mS)
+  float pulse_width_correction = 8;     // Non-linear injector correction (mS)
+  float lambda = 9;                     // Commanded lambda
+  float ve = 10;                        // Current volumetric efficiency
+  float engine_temp_enrichment = 11;    // Applied engine temperature enrichment multiplier
 
   bool rpm_limit_cut = 12;
   bool boost_cut = 13;
-  bool fuel_overduty_cut = 14;
-  bool dwell_overduty_cut = 15;
+  bool fuel_overduty_cut = 14;          // Fuel duty cycle exceeded configured maximum
+  bool dwell_overduty_cut = 15;         // Unable to schedule ignition pulses due to minimum dwell being reached
 }
 
 message Event {
@@ -379,11 +382,9 @@ message Response {
   message SetConfig {
     Configuration config = 1;
     bool success = 2;
-    bool requires_restart = 3;
   }
   message GetConfig {
     Configuration config = 1;
-    bool needs_flash = 2;
   }
   message FlashConfig {
     bool success = 1;
