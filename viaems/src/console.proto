@@ -468,6 +468,8 @@ message Response {
     string platform = 2;   // Platform string
   }
 
+  message ResetToBootloader { }
+
   message SetDebug {
     float test_trigger_rpm = 1;
   }
@@ -480,7 +482,8 @@ message Response {
     SetConfig setconfig = 4;
     GetConfig getconfig = 5;
     FlashConfig flashconfig = 6;
-    SetDebug setdebug = 7;
+    ResetToBootloader resettobootloader = 7;
+    SetDebug setdebug = 8;
   }
 }
 
