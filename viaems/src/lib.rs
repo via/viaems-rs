@@ -1,6 +1,7 @@
 pub mod connection;
 pub mod interface;
 mod log;
+pub mod analyze;
 
 pub use log::Log;
 pub use log::UpdateWriter;
@@ -13,6 +14,7 @@ use std::time::{Duration, SystemTime};
 pub use duckdb::arrow;
 
 type UpdateCallback = dyn FnMut(SystemTime, &interface::EngineUpdate) -> () + Send;
+type EventCallback = dyn FnMut(SystemTime, &interface::Event) -> () + Send;
 type RequestCallback = dyn FnOnce(interface::Response) -> () + Send;
 
 struct Command {
@@ -22,6 +24,7 @@ struct Command {
 
 struct ConnectionState {
     on_update: Option<Box<UpdateCallback>>,
+    on_event: Option<Box<EventCallback>>,
     commands: VecDeque<Command>,
     running: bool,
 }
@@ -36,6 +39,7 @@ impl Manager {
     pub fn new(connection: connection::Connection) -> Manager {
         let state = Arc::new(Mutex::new(ConnectionState {
             on_update: None,
+            on_event: None,
             commands: VecDeque::new(),
             running: true,
         }));
@@ -63,6 +67,12 @@ impl Manager {
                         let mut state = state.lock().unwrap();
                         if let Some(cb) = &mut state.on_update {
                             cb(time, &eu);
+                        }
+                    }
+                    Some(interface::message::Msg::Event(ev)) => {
+                        let mut state = state.lock().unwrap();
+                        if let Some(cb) = &mut state.on_event {
+                            cb(time, &ev);
                         }
                     }
                     Some(interface::message::Msg::Response(response)) => {
@@ -97,6 +107,14 @@ impl Manager {
     {
         let mut locked = self.state.lock().unwrap();
         locked.on_update = Some(Box::new(f));
+    }
+
+    pub fn on_event<F>(&self, f: F)
+    where
+        F: FnMut(SystemTime, &interface::Event) -> () + Send + 'static,
+    {
+        let mut locked = self.state.lock().unwrap();
+        locked.on_event = Some(Box::new(f));
     }
 
     pub fn command<F>(&self, req: interface::Request, callback: F)

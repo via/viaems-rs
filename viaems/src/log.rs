@@ -40,10 +40,15 @@ impl From<duckdb::arrow::error::ArrowError> for Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+enum Update {
+    EngineUpdate(interface::EngineUpdate),
+    Event(interface::Event),
+}
+
 enum LogMessage {
     Update {
         time: SystemTime,
-        update: interface::EngineUpdate,
+        update: Update
     },
     Terminate,
 }
@@ -109,6 +114,16 @@ impl UpdateWriter {
             conn.execute(&query, [])?;
         }
 
+        if let Err(_) = &mut conn.prepare("DESCRIBE TABLE events;") {
+            let query = r"
+                CREATE TABLE events (realtime_ns BIGINT,
+                                     cputime UINTEGER,
+                                     gpio UINTEGER,
+                                     trigger UINTEGER,
+                                     output UINTEGER);";
+            conn.execute(&query, [])?;
+        }
+
         Ok(())
     }
 
@@ -122,19 +137,24 @@ impl UpdateWriter {
             .spawn(move || {
                 let mut count = 0;
 
-                let mut appender = conn.appender("points").unwrap();
+                let mut update_appender = conn.appender("points").unwrap();
+                let mut event_appender = conn.appender("events").unwrap();
                 while let Ok(val) = rx.recv() {
                     match val {
-                        LogMessage::Update { time, update } => {
-                            UpdateWriter::write(&mut appender, time, &update);
+                        LogMessage::Update { time, update: Update::EngineUpdate(update) } => {
+                            UpdateWriter::write_update(&mut update_appender, time, &update);
                             count += 1;
                             if count > 25000 {
-                                appender.flush().unwrap();
+                                update_appender.flush().unwrap();
                                 count = 0;
                             }
                         }
+                        LogMessage::Update { time, update: Update::Event(event) } => {
+                            UpdateWriter::write_event(&mut event_appender, time, &event);
+                        }
                         LogMessage::Terminate => {
-                            appender.flush().unwrap();
+                            update_appender.flush().unwrap();
+                            event_appender.flush().unwrap();
                             break;
                         }
                     }
@@ -147,11 +167,15 @@ impl UpdateWriter {
         })
     }
 
-    pub fn add(&self, time: SystemTime, update: interface::EngineUpdate) {
-        self.tx.send(LogMessage::Update { time, update }).unwrap();
+    pub fn update(&self, time: SystemTime, update: interface::EngineUpdate) {
+        self.tx.send(LogMessage::Update { time, update: Update::EngineUpdate(update) }).unwrap();
     }
 
-    fn write(appender: &mut duckdb::Appender, time: SystemTime, update: &interface::EngineUpdate) {
+    pub fn event(&self, time: SystemTime, event: interface::Event) {
+        self.tx.send(LogMessage::Update { time, update: Update::Event(event) }).unwrap();
+    }
+
+    fn write_update(appender: &mut duckdb::Appender, time: SystemTime, update: &interface::EngineUpdate) {
         let epoch_time: i64 = time
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
@@ -167,6 +191,22 @@ impl UpdateWriter {
         appender
             .append_row(duckdb::appender_params_from_iter(params_list))
             .unwrap();
+    }
+
+    fn write_event(appender: &mut duckdb::Appender, time: SystemTime, event: &interface::Event) {
+        let epoch_time: i64 = time
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+            .try_into()
+            .unwrap();
+
+        let gpio = if let Some(interface::event::Type::GpioPins(gpio)) = event.r#type { Some(gpio) } else { None };
+        let trigger = if let Some(interface::event::Type::Trigger(trigger)) = event.r#type { Some(trigger) } else { None };
+        let output = if let Some(interface::event::Type::OutputPins(output)) = event.r#type { Some(output) } else { None };
+
+        appender.append_row(duckdb::params![epoch_time, event.header.unwrap().timestamp, gpio, trigger, output]).unwrap();
+
     }
 }
 
@@ -224,6 +264,10 @@ impl Log {
             conn,
             filename: self.filename.clone(),
         })
+    }
+
+    pub(crate) fn handle(&self) -> Result<duckdb::Connection> { 
+        Ok(self.conn.try_clone()?)
     }
 
     pub fn query_arrow<F>(

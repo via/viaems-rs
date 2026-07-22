@@ -90,11 +90,11 @@ pub fn render_status_pane(ui: &mut egui::Ui, latest_feed: &interface::EngineUpda
                         ui.end_row();
 
                         ui.label("KNK1");
-                        ui.label(sensors.knock1.to_string());
+                        ui.label(format!("{:.4}", sensors.knock1));
                         ui.end_row();
 
                         ui.label("KNK2");
-                        ui.label(sensors.knock2.to_string());
+                        ui.label(format!("{:.4}", sensors.knock2));
                         ui.end_row();
                     });
             });

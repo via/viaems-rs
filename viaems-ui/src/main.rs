@@ -70,12 +70,26 @@ impl<'a> Application {
             };
             move |time: SystemTime, update: &interface::EngineUpdate| {
                 if let Some(w) = &logwriter {
-                    w.add(time, update.clone());
+                    w.update(time, update.clone());
                 }
                 view.lock().unwrap().add_new_data(time, update);
                 Application::update_feed(&feed_state, time, update);
             }
         });
+        target.on_event({
+            let logwriter: Option<viaems::UpdateWriter> = if let Some(reader) = &self.log { 
+                reader.get_writer().ok() 
+            } else { 
+                None 
+            };
+            move |time: SystemTime, event: &interface::Event| {
+                if let Some(w) = &logwriter {
+                    w.event(time, event.clone());
+                }
+
+            }
+        });
+
 
         let req = interface::Request {
             id: 1,
@@ -242,7 +256,10 @@ fn main() -> Result<(), eframe::Error> {
             state.desired_configuration = Some(live_config.clone());
         }
         if let Some(config) = &mut state.desired_configuration {
-            egui::SidePanel::right("right panel").show(ctx, |ui| {
+            egui::Window::new("Config")
+                .anchor(egui::Align2::RIGHT_TOP, [0.0, 0.0]) // TODO better placement
+                .show(ctx, |ui| {
+//            egui::SidePanel::right("right panel").show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     if ui.button("Save").clicked() {
                         if let Some(target) = &state.target {

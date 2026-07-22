@@ -257,16 +257,26 @@ impl LogViewer {
             let start = DateTime::from_timestamp_nanos(start_ns);
             let stop = DateTime::from_timestamp_nanos(stop_ns);
 
+
+            println!("drawrect: {:?}", ui.max_rect());
+
             // Put range labels in bottom corner
             ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                 ui.horizontal(|ui| {
-                    ui.with_layout(egui::Layout::default().with_cross_align(Align::LEFT), |l| {
+                    let maybe_mouse = ui.input(|i| i.pointer.hover_pos());
+                    ui.columns(3, |cols| {
+
+                    cols[0].with_layout(egui::Layout::left_to_right(egui::Align::LEFT), |l| {
                         l.label(start.format("%Y-%m-%d %H:%M:%S").to_string())
                     });
-                    ui.with_layout(
-                        egui::Layout::default().with_cross_align(Align::RIGHT),
-                        |r| r.label(stop.format("%Y-%m-%d %H:%M:%S").to_string()),
-                    );
+                    cols[1].with_layout(egui::Layout::left_to_right(egui::Align::Center), |c| {
+                        c.label("TIME")
+                    });
+                    cols[2].with_layout(
+                        egui::Layout::right_to_left(Align::RIGHT), |r| {
+                          r.label(stop.format("%Y-%m-%d %H:%M:%S").to_string())
+                        });
+                    });
                 });
             });
         }
